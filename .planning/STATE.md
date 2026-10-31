@@ -2,8 +2,8 @@
 
 ## Current Position
 - **Phase**: 3 of 9 (executing)
-- **Status**: Phase 3 executing — Plan 03-04 complete
-- **Last Activity**: Plan 03-04 execution (2026-10-31)
+- **Status**: Phase 3 executing — Plan 03-05 failed
+- **Last Activity**: Plan 03-05 execution (2026-10-31)
 
 ## Progress
 ```
@@ -49,3 +49,4 @@ Run `/triad:build` to execute Phase 3: Enrollment and NATS auth callout
 - Plan 03-02 (Wave 1): Device identity: key store, hardware facts and shared enrollment types — Complete
 - Plan 03-03 (Wave 2): Enrollment API, Entra auth and trust artifact upload — Complete
 - Plan 03-04 (Wave 2): Agent enroll and connect — Complete
+- Plan 03-05 (Wave 3): NATS auth callout service and end-to-end enrollment — BLOCKED: The disk problem is fixed, but scripts/e2e-enroll.sh cannot pass until the agent's rustls provider bug is fixed in crates/rmm-agent-core, which is outside this plan's files.
