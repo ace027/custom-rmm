@@ -12,6 +12,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use utoipa::OpenApi;
 
+mod api;
+mod dev_token;
+
 /// RMM server.
 #[derive(Debug, Parser)]
 #[command(name = "rmm-server", version)]
@@ -32,6 +35,18 @@ enum Command {
     Migrate,
     /// Print the OpenAPI document as pretty JSON.
     Openapi,
+    /// Print a development JWT (needs RMM_AUTH_DEV_KEY_FILE and RMM_ENTRA_AUDIENCE).
+    DevToken {
+        /// App role to grant.
+        #[arg(long, default_value = "RMM.Admin")]
+        role: String,
+        /// Token subject.
+        #[arg(long, default_value = "dev-admin")]
+        sub: String,
+        /// Lifetime in seconds.
+        #[arg(long, default_value_t = 3600)]
+        ttl: u64,
+    },
     /// Probe an http:// URL and exit non-zero unless it answers 2xx.
     Healthcheck {
         /// URL to probe, e.g. http://127.0.0.1:8080/healthz
@@ -117,9 +132,12 @@ async fn serve(addr: &str, app: Router) -> Result<()> {
         .with_context(|| format!("bad listen address {addr}"))?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "listening");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
     Ok(())
 }
 
@@ -215,7 +233,13 @@ async fn main() -> Result<()> {
                 std::process::exit(1);
             }
         }
-        Command::Api => serve(&env_or("RMM_API_LISTEN", "0.0.0.0:8080"), rmm_api::router()).await?,
+        Command::DevToken { role, sub, ttl } => {
+            println!("{}", dev_token::run(&role, &sub, ttl)?);
+        }
+        Command::Api => {
+            let app = api::build_router().await?;
+            serve(&env_or("RMM_API_LISTEN", "0.0.0.0:8080"), app).await?;
+        }
         Command::Ingest => run_nats_service("rmm-ingest", "0.0.0.0:8081").await?,
         Command::Authd => run_nats_service("rmm-authd", "0.0.0.0:8082").await?,
         Command::Migrate => run_migrate().await?,
@@ -243,6 +267,16 @@ mod tests {
                 want
             );
         }
+        let cli = Cli::try_parse_from(["rmm-server", "dev-token", "--role", "X", "--ttl", "60"])
+            .expect("dev-token");
+        assert_eq!(
+            cli.command,
+            Command::DevToken {
+                role: "X".to_string(),
+                sub: "dev-admin".to_string(),
+                ttl: 60
+            }
+        );
         let cli = Cli::try_parse_from(["rmm-server", "healthcheck", "http://x/y"]).expect("hc");
         assert_eq!(
             cli.command,

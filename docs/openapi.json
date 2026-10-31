@@ -10,6 +10,217 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/v1/agents/{agent_id}/revoke": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Revoke an agent and tell NATS to drop its connection.",
+        "operationId": "revoke_agent",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "description": "Agent id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Agent revoked"
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing RMM.Admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/enrollment-tokens": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create an enrollment token.",
+        "operationId": "create_enrollment_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Token created (shown once)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateTokenResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing RMM.Admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/trust/{kind}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Upload a signed trust artifact.",
+        "operationId": "put_trust",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "manifest, revocations or techlist",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Artifact verified and stored"
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing RMM.Admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown kind",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Verification failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/healthz": {
       "get": {
         "tags": [],
@@ -28,10 +239,149 @@
           }
         }
       }
+    },
+    "/v1/enroll": {
+      "post": {
+        "tags": [
+          "enroll"
+        ],
+        "summary": "Enroll a new agent.",
+        "operationId": "enroll",
+        "requestBody": {
+          "description": "EnrollRequest (rmm_proto::enroll)",
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Enrolled; body is an EnrollResponse",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad token or proof",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Public key already enrolled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "CreateTokenRequest": {
+        "type": "object",
+        "description": "Request to mint an enrollment token.",
+        "required": [
+          "client_id",
+          "site_id",
+          "expires_in_hours",
+          "max_uses",
+          "allow_reattach"
+        ],
+        "properties": {
+          "allow_reattach": {
+            "type": "boolean",
+            "description": "Whether a device may be reattached by this token."
+          },
+          "client_id": {
+            "type": "string",
+            "description": "Client the token belongs to."
+          },
+          "expires_in_hours": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Lifetime in hours (1..=720)."
+          },
+          "max_uses": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Maximum uses (1..=1000)."
+          },
+          "site_id": {
+            "type": "string",
+            "description": "Site devices enroll into."
+          }
+        }
+      },
+      "CreateTokenResponse": {
+        "type": "object",
+        "description": "A freshly minted token; the secret is shown only here.",
+        "required": [
+          "token",
+          "token_id",
+          "expires_at"
+        ],
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "description": "Expiry instant (RFC 3339)."
+          },
+          "token": {
+            "type": "string",
+            "description": "Token secret (`rmmenr_...`)."
+          },
+          "token_id": {
+            "type": "string",
+            "description": "Token id."
+          }
+        }
+      },
+      "ErrorBody": {
+        "type": "object",
+        "description": "JSON error body.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Human-readable reason."
+          }
+        }
+      },
       "Health": {
         "type": "object",
         "description": "Body returned by the health endpoint.",
@@ -44,6 +394,13 @@
             "description": "Always `ok` when the process is serving."
           }
         }
+      }
+    },
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
       }
     }
   }
