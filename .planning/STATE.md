@@ -1,9 +1,9 @@
 # Project State
 
 ## Current Position
-- **Phase**: 2 of 9 (executed, pending review)
-- **Status**: Phase 2 under review — cycle 1/3, 0 blocker(s) remaining
-- **Last Activity**: Phase 2 review cycle 1 (2026-10-31)
+- **Phase**: 2 of 9 (complete)
+- **Status**: Phase 2 complete — review passed (2 cycle(s))
+- **Last Activity**: Phase 2 review (2026-10-31)
 
 ## Progress
 ```
@@ -26,7 +26,7 @@
 - Foundation is broken into 9 Triad phases (design milestones M0-M8); product phases 2-6 come later
 
 ## Next Action
-Run `/triad:review` to verify Phase 2: Trust core and signing CLI
+Run `/triad:plan 3` to plan Phase 3: Enrollment and NATS auth callout
 
 ## Phase 1 Results
 (build started 2026-10-31)
