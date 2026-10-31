@@ -1,13 +1,13 @@
 # Project State
 
 ## Current Position
-- **Phase**: 2 of 9 (planned)
-- **Status**: Phase 2 planned -- 4 plans across 3 waves
-- **Last Activity**: Phase 2 planning (2026-10-31)
+- **Phase**: 2 of 9 (executing)
+- **Status**: Phase 2 executing — Plan 02-01 complete
+- **Last Activity**: Plan 02-01 execution (2026-10-31)
 
 ## Progress
 ```
-[##..................] 10% — 3/29 plans complete
+[##..................] 13% — 4/29 plans complete
 ```
 
 ## Recent Decisions
@@ -34,3 +34,7 @@ Run `/triad:build` to execute Phase 2: Trust core and signing CLI
 - Plan 01-02 (Wave 2): Docker compose dev environment and server stubs — Complete
 - Plan 01-03 (Wave 3): GitHub Actions CI — PARTIAL: ci.yml, ci-local.sh, docs/ci.md and the README CI section are written. actionlint is clean, and windows-cross and test-linux pass locally. `ci-local.sh lint` fails at `cargo deny check` on an advisory
 - Plan 01-03 (Wave 3): GitHub Actions CI — Complete
+
+## Phase 2 Results
+(build started 2026-10-31)
+- Plan 02-01 (Wave 1): Canonical CBOR codec, keys and signed envelope — Complete
