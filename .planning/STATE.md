@@ -1,9 +1,9 @@
 # Project State
 
 ## Current Position
-- **Phase**: 1 of 9 (complete)
-- **Status**: Phase 1 complete — review passed (1 cycle(s))
-- **Last Activity**: Phase 1 review (2026-10-31)
+- **Phase**: 2 of 9 (planned)
+- **Status**: Phase 2 planned -- 4 plans across 3 waves
+- **Last Activity**: Phase 2 planning (2026-10-31)
 
 ## Progress
 ```
@@ -26,7 +26,7 @@
 - Foundation is broken into 9 Triad phases (design milestones M0-M8); product phases 2-6 come later
 
 ## Next Action
-Run `/triad:plan 2` to plan Phase 2: Trust core and signing CLI
+Run `/triad:build` to execute Phase 2: Trust core and signing CLI
 
 ## Phase 1 Results
 (build started 2026-10-31)
