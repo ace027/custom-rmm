@@ -1,13 +1,13 @@
 # Project State
 
 ## Current Position
-- **Phase**: 2 of 9 (partial — 1 plan(s) failed)
-- **Status**: Phase 2 partial — 02-04 failed, stopped after wave 3, review needed
+- **Phase**: 2 of 9 (executing)
+- **Status**: Phase 2 executing — Plan 02-04 complete
 - **Last Activity**: Plan 02-04 execution (2026-10-31)
 
 ## Progress
 ```
-[####................] 20% — 6/29 plans complete
+[####................] 24% — 7/29 plans complete
 ```
 
 ## Recent Decisions
@@ -41,3 +41,4 @@ Fix the failed plans and run `/triad:build` again (completed plans are kept), or
 - Plan 02-02 (Wave 2): Trust documents, manifest chain and revocation verification — Complete with Warnings
 - Plan 02-03 (Wave 2): WebAuthn assertion verification — Complete
 - Plan 02-04 (Wave 3): rmm-sign CLI, YubiKey backend, runbooks and agent no-sign check — PARTIAL: The rmm-sign CLI, card backend, runbooks, agent no-sign check and CI wiring are done and verified. The one failing gate is `scripts/ci-local.sh lint`, which stops at `cargo deny check` on two advisori
+- Plan 02-04 (Wave 3): rmm-sign CLI, YubiKey backend, runbooks and agent no-sign check — Complete

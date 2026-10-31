@@ -121,7 +121,7 @@
 | Phase | Plans | Completed | Status |
 |-------|-------|-----------|--------|
 | 1 | 3 | 3 | Complete |
-| 2 | 4 | 3 | Partial |
+| 2 | 4 | 4 | Executed |
 | 3 | 4 | 0 | Pending |
 | 4 | 3 | 0 | Pending |
 | 5 | 2 | 0 | Pending |
