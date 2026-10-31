@@ -1,0 +1,28 @@
+[package]
+name = "rmm-platform"
+description = "Platform trait with per-OS implementations; the only crate allowing unsafe"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+version.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
+[lints.rust]
+unsafe_code = "allow"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "deny"
+unwrap_used = "warn"
+print_stdout = "allow"
+undocumented_unsafe_blocks = "deny"

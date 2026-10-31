@@ -1,0 +1,45 @@
+[workspace]
+members = ["crates/*", "xtask"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.97"
+license = "UNLICENSED"
+publish = false
+version = "0.1.0"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+async-nats = { version = "0.42", default-features = false, features = ["websockets", "ring", "server_2_11"] }
+axum = "0.8"
+utoipa = { version = "5", features = ["axum_extras"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+clap = { version = "4", features = ["derive"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "migrate", "uuid", "chrono"] }
+rustix = { version = "1", features = ["system"] }
+windows = { version = "0.62", features = ["Win32_System_SystemInformation", "Win32_Foundation"] }
+tower = { version = "0.5", features = ["util"] }
+
+rmm-proto = { path = "crates/rmm-proto" }
+rmm-trust = { path = "crates/rmm-trust" }
+rmm-recipe = { path = "crates/rmm-recipe" }
+rmm-platform = { path = "crates/rmm-platform" }
+rmm-agent-core = { path = "crates/rmm-agent-core" }
+rmm-db = { path = "crates/rmm-db" }
+rmm-api = { path = "crates/rmm-api" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "deny"
+unwrap_used = "warn"
+print_stdout = "allow"

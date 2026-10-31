@@ -1,1 +1,5 @@
 target/
+/target
+deploy/dev/
+deploy/.env
+*.pem

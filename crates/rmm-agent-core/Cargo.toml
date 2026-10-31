@@ -1,0 +1,17 @@
+[package]
+name = "rmm-agent-core"
+description = "Platform-agnostic agent core"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+version.workspace = true
+
+[dependencies]
+rmm-proto.workspace = true
+rmm-trust = { workspace = true }
+rmm-recipe.workspace = true
+rmm-platform.workspace = true
+
+[lints]
+workspace = true
