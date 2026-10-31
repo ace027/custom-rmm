@@ -5,15 +5,15 @@
 **Wave**: 3
 **Agent**: engineering-security-engineer
 **Completed**: 2026-10-31
-**Failure Class**: BLOCKER (after one automatic ENVIRONMENT retry) — ENVIRONMENT issue persisted after one automatic retry: $ scripts/e2e-enroll.sh (exit 1)
+**Failure Class**: BLOCKER — $ scripts/e2e-enroll.sh (exit 1)
 
 ## Agent Selection Rationale
 
 | Candidate | Semantic | Heuristic | Memory | Total | Source |
 |-----------|----------|-----------|--------|-------|--------|
-| engineering-security-engineer | — | 9 | 3 | 12 | mandatory |
+| engineering-security-engineer | — | 9 | 2.83 | 11.83 | mandatory |
 | engineering-infrastructure-devops | — | 22 | 3.67 | 25.67 | heuristic |
-| engineering-senior-developer | — | 21 | 4.2 | 25.2 | heuristic |
+| engineering-senior-developer | — | 21 | 4.14 | 25.14 | heuristic |
 
 - **Task type detected**: implementation
 - **Confidence**: LOW
@@ -26,20 +26,7 @@
 - [ ] Task 3: End-to-end enrollment test and CI (partial)
 
 ## Files Modified
-- `.github/workflows/ci.yml`
-- `crates/rmm-server/src/authd.rs`
-- `crates/rmm-server/src/main.rs`
-- `crates/rmm-server/src/natsjwt.rs`
-- `crates/rmm-server/tests/natsjwt.rs`
-- `deploy/.env.example`
-- `deploy/compose.yaml`
-- `deploy/nats/nats.conf`
-- `docs/dev-environment.md`
-- `docs/runbooks/windows-enroll-check.md`
-- `scripts/ci-local.sh`
-- `scripts/dev-up.sh`
-- `scripts/e2e-enroll.sh`
-- `scripts/nkey-seed.py`
+(none)
 
 ## Verification Results
 11/12 verification commands passed (run by Triad after the agent finished).
@@ -61,29 +48,27 @@
 | `grep -q e2e-enroll .github/workflows/ci.yml` | 0 | PASS |
 
 ## Key Decisions
-- Nonce: NATS has no `always_enable_nonce` config option. The server sends a nonce only when at least one nkey user exists, so nats.conf has one deny-all nkey user whose seed I discarded.
+- authd also denies when the stored nkey differs from connect_opts.nkey. A non-WebSocket conn_type is denied in the precheck; an empty conn_type passes the precheck, but the JWT's allowed_connection_types [WEBSOCKET] still blocks it at the server.
 
 ## Issues Encountered
-- Agent bug in rmm-agent-core: TLS has no default rustls CryptoProvider, so the agent panics on every wss:// connect. This blocks e2e steps 1, 5 and 7.
-- Blocked: The disk problem is fixed, but scripts/e2e-enroll.sh cannot pass until the agent's rustls provider bug is fixed in crates/rmm-agent-core, which is outside this plan's files.
-- BLOCKER: ENVIRONMENT issue persisted after one automatic retry: $ scripts/e2e-enroll.sh (exit 1)
+- The 03-04 transport.rs workaround (`with_auth_callback` setting `auth.signature`) never worked: without the async-nats `nkeys` feature the connector discards the signature. authd fails closed here, which is the correct security behaviour.
+- Blocked: The fix is to add "nkeys" to the async-nats features in the root Cargo.toml (`features = ["websockets", "ring", "server_2_11", "nkeys"]`) and update Cargo.lock. Both files are forbidden to this plan. The nkeys crate is already a workspace dependency, so this adds no new crate.
+- BLOCKER: $ scripts/e2e-enroll.sh (exit 1)
 
 ## Escalations
 | # | Severity | Type | Decision | Status | Resolution |
 |---|----------|------|----------|--------|------------|
-| 1 | blocker | out-of-scope-file | Fix the rustls CryptoProvider selection in the agent: in crates/rmm-agent-core/src/transport.rs, call `async_nats::rustls::crypto::ring::default_provider().install_default()` (ignore the result) before connecting, or remove the duplicate ring/aws-lc-rs features. | approved | User approved the agent rustls fix. Orchestrator applied it in crates/rmm-agent-core/src/transport.rs (install ring default provider before connecting), commit a5923d8. |
-| 2 | info | unplanned-dependency | Consider adding futures-util (already in Cargo.lock as a transitive dependency) as a direct dependency of rmm-server, so authd can use an async_nats Subscriber instead of the hand-written protocol reader. The same change would give the callout connection TLS. | approved | User approved futures-util as a direct rmm-server dependency (added to workspace and crates/rmm-server/Cargo.toml in commit a5923d8). authd may replace the hand-written protocol reader with an async-nats Subscriber, which also gives the callout connection TLS. |
-| 3 | blocker | quality | Resolve: ENVIRONMENT issue persisted after one automatic retry: $ scripts/e2e-enroll.sh (exit 1) | approved | The e2e failure was the agent rustls provider panic (now fixed) plus disk exhaustion (cleaned). Re-run the build to verify scripts/e2e-enroll.sh. |
+| 1 | blocker | unplanned-dependency-change | Enable the `nkeys` feature on the workspace async-nats dependency in Cargo.toml and refresh Cargo.lock. | pending | INVALID: type "unplanned-dependency-change" is not one of architecture, dependency, scope, schema, api, deletion, infrastructure, quality |
+| 2 | blocker | quality | Resolve: $ scripts/e2e-enroll.sh (exit 1) | pending |  |
 
-- #1 context: The debug rmm-agent panics on every wss:// connect with "Could not automatically determine the process-level CryptoProvider", because both rustls backends are enabled in its build. This blocks e2e steps 1, 5 and 7, the phase's main success criterion. Those files belong to plan 03-04.
-- #2 context: Cargo.toml and Cargo.lock were forbidden in this plan.
-- #3 context: Verification failed (scripts/e2e-enroll.sh); a BLOCKER is not auto-fixed.
+- #1 context: async-nats 0.51 built without `nkeys` drops Auth.signature from CONNECT (connector.rs:698-701), so agents cannot prove possession of their key and authd denies every agent (fail closed). The 03-04 workaround in crates/rmm-agent-core/src/transport.rs depended on that field being sent. This is the only remaining failure in plan 03-05. Do not work around it by loosening authd; signature verification is the core authentication control.
+- #2 context: Verification failed (scripts/e2e-enroll.sh); a BLOCKER is not auto-fixed.
 
 ## Handoff Context
-- **Key outputs**: .github/workflows/ci.yml; crates/rmm-server/src/authd.rs; crates/rmm-server/src/main.rs; crates/rmm-server/src/natsjwt.rs; crates/rmm-server/tests/natsjwt.rs; deploy/.env.example; deploy/compose.yaml; deploy/nats/nats.conf; docs/dev-environment.md; docs/runbooks/windows-enroll-check.md; scripts/ci-local.sh; scripts/dev-up.sh; scripts/e2e-enroll.sh; scripts/nkey-seed.py
-- **Decisions made**: Nonce: NATS has no `always_enable_nonce` config option. The server sends a nonce only when at least one nkey user exists, so nats.conf has one deny-all nkey user whose seed I discarded.
+- **Key outputs**: (none)
+- **Decisions made**: authd also denies when the stored nkey differs from connect_opts.nkey. A non-WebSocket conn_type is denied in the precheck; an empty conn_type passes the precheck, but the JWT's allowed_connection_types [WEBSOCKET] still blocks it at the server.
 - **Open questions**: (none)
-- **Conventions established**: Once the agent fix lands, run `RMM_HTTPS_PORT=8443 scripts/e2e-enroll.sh`. It needs root or passwordless sudo, plus docker and natsio/nats-box.
+- **Conventions established**: Once the feature is enabled, re-run scripts/e2e-enroll.sh. The dev stack is up and healthy. The agent code should not need changes.
 
 ## Requirements Covered
 - REQ-10
@@ -93,25 +78,20 @@
 ### Failed verification output
 `scripts/e2e-enroll.sh`
 ```
-:task::raw::RawTask>::poll
-             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.54.1/src/runtime/task/raw.rs:267:18
-  61: <tokio::runtime::task::UnownedTask<tokio::runtime::blocking::schedule::BlockingSchedule>>::run
-             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.54.1/src/runtime/task/mod.rs:560:13
-  62: <tokio::runtime::blocking::pool::Task>::run
-             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.54.1/src/runtime/blocking/pool.rs:220:19
-  63: <tokio::runtime::blocking::pool::LockedImpl>::run_worker
-             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.54.1/src/runtime/blocking/pool.rs:660:22
-  64: <tokio::runtime::blocking::pool::InnerImpl>::run_worker
-             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.54.1/src/runtime/blocking/pool.rs:571:39
-  65: <tokio::runtime::blocking::pool::Inner>::run
-             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.54.1/src/runtime/blocking/pool.rs:764:18
-  66: <tokio::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}
-             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.54.1/src/runtime/blocking/pool.rs:525:47
-note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
-[2m2026-10-31T18:24:29.348839Z[0m [31mERROR[0m [2mrmm_agent[0m[2m:[0m nats connection closed
+rmm_agent[0m[2m:[0m connecting [3magent_id[0m[2m=[0m64ae33ee-6f66-471e-b990-e0253afc1248 [3murl[0m[2m=[0mwss://localhost:443/nats
+[2m2026-10-31T18:45:19.962126Z[0m [31mERROR[0m [2masync_nats::connector[0m[2m:[0m signature authentication requires 'nkeys' feature
+[2m2026-10-31T18:45:19.962326Z[0m [32m INFO[0m [2masync_nats[0m[2m:[0m event: client error: nats: failed signing nonce
+[2m2026-10-31T18:45:21.570522Z[0m [31mERROR[0m [2masync_nats::connector[0m[2m:[0m signature authentication requires 'nkeys' feature
+[2m2026-10-31T18:45:21.570773Z[0m [32m INFO[0m [2masync_nats[0m[2m:[0m event: client error: nats: failed signing nonce
+[2m2026-10-31T18:45:25.334261Z[0m [31mERROR[0m [2masync_nats::connector[0m[2m:[0m signature authentication requires 'nkeys' feature
+[2m2026-10-31T18:45:25.334484Z[0m [32m INFO[0m [2masync_nats[0m[2m:[0m event: client error: nats: failed signing nonce
+[2m2026-10-31T18:45:29.582764Z[0m [31mERROR[0m [2masync_nats::connector[0m[2m:[0m signature authentication requires 'nkeys' feature
+[2m2026-10-31T18:45:29.582996Z[0m [32m INFO[0m [2masync_nats[0m[2m:[0m event: client error: nats: failed signing nonce
+[2m2026-10-31T18:45:40.541410Z[0m [31mERROR[0m [2masync_nats::connector[0m[2m:[0m signature authentication requires 'nkeys' feature
+[2m2026-10-31T18:45:40.541673Z[0m [32m INFO[0m [2masync_nats[0m[2m:[0m event: client error: nats: failed signing nonce
 FAIL agent A run --once
 
 ```
 
 ## Token Usage
-69 requests, 8370303 input tokens (8005134 cached), 99862 output tokens, $5.4240
+11 requests, 352143 input tokens (309770 cached), 4924 output tokens, $0.3723
