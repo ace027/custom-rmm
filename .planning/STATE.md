@@ -2,8 +2,8 @@
 
 ## Current Position
 - **Phase**: 2 of 9 (executing)
-- **Status**: Phase 2 executing — Plan 02-03 complete
-- **Last Activity**: Plan 02-03 execution (2026-10-31)
+- **Status**: Phase 2 executing — Plan 02-04 failed
+- **Last Activity**: Plan 02-04 execution (2026-10-31)
 
 ## Progress
 ```
@@ -40,3 +40,4 @@ Run `/triad:build` to execute Phase 2: Trust core and signing CLI
 - Plan 02-01 (Wave 1): Canonical CBOR codec, keys and signed envelope — Complete
 - Plan 02-02 (Wave 2): Trust documents, manifest chain and revocation verification — Complete with Warnings
 - Plan 02-03 (Wave 2): WebAuthn assertion verification — Complete
+- Plan 02-04 (Wave 3): rmm-sign CLI, YubiKey backend, runbooks and agent no-sign check — PARTIAL: The rmm-sign CLI, card backend, runbooks, agent no-sign check and CI wiring are done and verified. The one failing gate is `scripts/ci-local.sh lint`, which stops at `cargo deny check` on two advisori
