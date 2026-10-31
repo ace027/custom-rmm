@@ -1,8 +1,9 @@
 //! Device key storage: the agent's Ed25519 seed never leaves the device
 //! unprotected. Windows uses DPAPI (see `windows.rs`); Unix uses a 0600 file.
 
-use crate::PlatformError;
 use std::path::{Path, PathBuf};
+
+use crate::PlatformError;
 
 /// File name of the protected seed inside the state directory.
 pub(crate) const KEY_FILE: &str = "agent.key";
@@ -49,13 +50,15 @@ pub fn default_state_dir() -> PathBuf {
 
 #[cfg(unix)]
 mod unix {
-    use super::{KEY_FILE, KeyStore};
-    use crate::PlatformError;
     use std::fs::{self, DirBuilder, OpenOptions};
     use std::io::{ErrorKind, Read, Write};
     use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
     use std::path::{Path, PathBuf};
+
     use zeroize::Zeroizing;
+
+    use super::{KEY_FILE, KeyStore};
+    use crate::PlatformError;
 
     fn os_err(what: &str, e: std::io::Error) -> PlatformError {
         PlatformError::Os(format!("{what}: {e}"))

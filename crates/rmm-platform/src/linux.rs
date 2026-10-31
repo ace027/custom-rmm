@@ -1,5 +1,6 @@
-use crate::{HwFacts, Platform, PlatformError};
 use std::fs;
+
+use crate::{HwFacts, Platform, PlatformError};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Current;

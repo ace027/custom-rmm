@@ -56,8 +56,7 @@ pub type Result<T> = std::result::Result<T, JwtError>;
 fn unix_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs())
 }
 
 /// Sign `claims` as a NATS JWT. `iss` and `jti` are always set; `iat` is set
