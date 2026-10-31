@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select d.id as \"device_id!\", d.client_id as \"client_id!\",\n                  a.id as \"agent_id?\", a.status as \"agent_status?\", a.last_seen as \"last_seen?\"\n           from tenant.device d\n           left join lateral (\n               select id, status, last_seen from tenant.agent\n               where device_id = d.id and status <> 'superseded'\n               order by enrolled_at desc limit 1\n           ) a on true\n           where d.hw_fingerprint = $1\n           order by d.created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "device_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "client_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "agent_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "agent_status?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "last_seen?",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "a2835fdeb8c2bb2434c032401f9e9dd3d6aa4bb460bcb286400fb1d708e56283"
+}

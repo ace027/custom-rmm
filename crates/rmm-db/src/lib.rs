@@ -1,4 +1,7 @@
-//! Database access layer: pool, migrations and a connectivity probe.
+//! Database access layer: pool, migrations, scoped transactions and repositories.
+
+pub mod repo;
+pub mod scope;
 
 use std::time::{Duration, Instant};
 
@@ -20,6 +23,9 @@ pub enum DbError {
     /// Applying migrations failed.
     #[error("migration error: {0}")]
     Migrate(#[from] sqlx::migrate::MigrateError),
+    /// A role name failed validation.
+    #[error("invalid role name: {0}")]
+    InvalidRole(String),
 }
 
 /// Connect to Postgres, retrying for up to 30 seconds.

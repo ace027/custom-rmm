@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select a.id as agent_id, a.client_id, a.device_id, a.status,\n                  c.status as client_status, a.nkey\n           from tenant.agent a join tenant.client c on c.id = a.client_id\n           where a.credential_pubkey = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "agent_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "client_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "device_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "client_status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "nkey",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8bf24669ddee2c88b5efcc3a8da2f112ce59ff3a598449954ba45bbbfac83108"
+}

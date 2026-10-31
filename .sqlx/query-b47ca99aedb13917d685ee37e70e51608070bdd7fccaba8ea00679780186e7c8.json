@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select distinct on (kind) kind, seq, envelope\n           from msp.trust_artifact order by kind, seq desc",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "seq",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "envelope",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b47ca99aedb13917d685ee37e70e51608070bdd7fccaba8ea00679780186e7c8"
+}
