@@ -2,12 +2,12 @@
 
 ## Current Position
 - **Phase**: 3 of 9 (executing)
-- **Status**: Phase 3 executing — Plan 03-02 complete
-- **Last Activity**: Plan 03-02 execution (2026-10-31)
+- **Status**: Phase 3 executing — Plan 03-04 complete
+- **Last Activity**: Plan 03-04 execution (2026-10-31)
 
 ## Progress
 ```
-[######..............] 30% — 9/30 plans complete
+[#######.............] 36% — 11/30 plans complete
 ```
 
 ## Recent Decisions
@@ -47,3 +47,5 @@ Run `/triad:build` to execute Phase 3: Enrollment and NATS auth callout
 (build started 2026-10-31)
 - Plan 03-01 (Wave 1): Identity schema, RLS and repositories — Complete
 - Plan 03-02 (Wave 1): Device identity: key store, hardware facts and shared enrollment types — Complete
+- Plan 03-03 (Wave 2): Enrollment API, Entra auth and trust artifact upload — Complete
+- Plan 03-04 (Wave 2): Agent enroll and connect — Complete
