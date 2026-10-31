@@ -1,4 +1,6 @@
-//! Verification side of the trust chain (skeleton).
+//! Verification side of the trust chain.
+
+pub use crate::envelope::{Envelope, SigEntry, pae, signing_message};
 
 /// Protocol version this verifier understands.
 pub fn supported_protocol() -> u16 {

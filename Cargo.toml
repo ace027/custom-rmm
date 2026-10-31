@@ -25,6 +25,18 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 rustix = { version = "1", features = ["system"] }
 windows = { version = "0.62", features = ["Win32_System_SystemInformation", "Win32_Foundation"] }
 tower = { version = "0.5", features = ["util"] }
+ciborium = "0.2"
+sha2 = "0.11"
+ed25519-dalek = { version = "3", default-features = false, features = ["zeroize"] }
+rand_core = "0.10"
+p256 = { version = "0.14", default-features = false, features = ["ecdsa"] }
+hex = "0.4"
+proptest = "1"
+age = "0.12"
+similar = "3"
+rpassword = "7"
+openpgp-card = "0.7"
+card-backend-pcsc = "0.5"
 
 rmm-proto = { path = "crates/rmm-proto" }
 rmm-trust = { path = "crates/rmm-trust" }
@@ -43,3 +55,10 @@ all = { level = "warn", priority = -1 }
 dbg_macro = "deny"
 unwrap_used = "warn"
 print_stdout = "allow"
+
+# Debug-mode curve arithmetic is very slow; optimize crypto crates so the
+# exhaustive bit-flip vector tests stay fast.
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+[profile.dev.package.ed25519-dalek]
+opt-level = 3

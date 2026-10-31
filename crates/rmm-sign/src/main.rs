@@ -5,5 +5,8 @@ fn main() {
         println!("rmm-sign {}", env!("CARGO_PKG_VERSION"));
         return;
     }
-    println!("rmm-sign: signing={}", rmm_trust::sign::SIGNING_ENABLED);
+    println!(
+        "rmm-sign: sign marker length={}",
+        rmm_trust::sign::SIGN_MODULE_MARKER.len()
+    );
 }
