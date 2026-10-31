@@ -453,6 +453,58 @@ async fn reattach_after_24h_keeps_device_and_supersedes_agent(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../rmm-db/migrations")]
+async fn flagged_device_is_never_reattached(pool: PgPool) {
+    let ctx = setup(pool).await;
+    let tok = make_token(&ctx, ctx.client, ctx.site, 5, true).await;
+    let first = enroll_ok(&ctx, &signed_request(&tok, 1, strong_hw("SN-1"), now())).await;
+    {
+        let mut tx = begin_scoped(&ctx.pool, &Scope::Service("test"), "test")
+            .await
+            .unwrap();
+        sqlx::query("update tenant.device set status = 'flagged' where id = $1")
+            .bind(first.device_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query(
+            "update tenant.agent set last_seen = now() - interval '25 hours' where id = $1",
+        )
+        .bind(first.agent_id)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+    }
+    let second = enroll_ok(&ctx, &signed_request(&tok, 2, strong_hw("SN-1"), now())).await;
+    assert_eq!(second.status, "pending_review");
+    assert_ne!(second.device_id, first.device_id);
+    let old: String = sqlx::query("select status from tenant.agent where id = $1")
+        .bind(first.agent_id)
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(old, "active");
+    let row = sqlx::query("select status, possible_clone_of from tenant.device where id = $1")
+        .bind(second.device_id)
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+    assert_eq!(row.get::<String, _>("status"), "pending_review");
+    assert_eq!(
+        row.get::<Option<Uuid>, _>("possible_clone_of"),
+        Some(first.device_id)
+    );
+    let flagged: String = sqlx::query("select status from tenant.device where id = $1")
+        .bind(first.device_id)
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(flagged, "flagged");
+}
+
+#[sqlx::test(migrations = "../rmm-db/migrations")]
 async fn recently_seen_agent_makes_pending_review(pool: PgPool) {
     let ctx = setup(pool).await;
     let tok = make_token(&ctx, ctx.client, ctx.site, 5, true).await;

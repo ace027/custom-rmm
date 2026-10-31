@@ -51,8 +51,8 @@ pub enum AttachDecision {
 /// Choose how to attach an enrollment. Pure.
 ///
 /// A weak fingerprint never matches. A strong match in the token's client
-/// reattaches only when the token allows it and the old agent has not been
-/// seen for 24 hours (or was never seen); otherwise the new device waits for
+/// reattaches only when the device itself is `active`, the token allows it and
+/// the old agent has not been seen for 24 hours (or was never seen); otherwise the new device waits for
 /// review. A match in another client is never reattached.
 pub fn decide(
     matches: &[DeviceMatch],
@@ -67,11 +67,9 @@ pub fn decide(
     let mut reattach: Option<AttachDecision> = None;
     for m in matches.iter().filter(|m| m.client_id == token.client_id) {
         let recent = m.last_seen.is_some_and(|t| t.timestamp() > recent_cutoff);
-        let held = matches!(
-            m.agent_status.as_deref(),
-            Some("revoked" | "suspect_clone")
-        );
-        if recent || held || !token.allow_reattach {
+        let held = matches!(m.agent_status.as_deref(), Some("revoked" | "suspect_clone"));
+        let device_active = m.device_status == "active";
+        if recent || held || !device_active || !token.allow_reattach {
             return AttachDecision::PendingReview {
                 possible_clone_of: m.device_id,
             };
@@ -245,18 +243,31 @@ pub async fn enroll(
     let (device_id, device_status, agent_status, mut detail) = match &decision {
         AttachDecision::New => {
             let id = repo::insert_device(&mut tx, new_device("active", None)).await?;
-            (id, "active", None, serde_json::json!({"decision": "new"}))
+            (
+                id,
+                "active".to_owned(),
+                None,
+                serde_json::json!({"decision": "new"}),
+            )
         }
         AttachDecision::Reattach {
             device_id,
             old_agent_id,
         } => {
+            // The stored status of the matched device; decide() only
+            // reattaches to an `active` one. Fail closed otherwise.
+            let stored = matches
+                .iter()
+                .find(|m| m.device_id == *device_id)
+                .map(|m| m.device_status.clone())
+                .filter(|s| s == "active")
+                .ok_or_else(|| ApiError::Conflict("device not eligible for reattach".into()))?;
             if let Some(old) = old_agent_id {
                 repo::supersede_agent(&mut tx, *old).await?;
             }
             (
                 *device_id,
-                "active",
+                stored,
                 None,
                 serde_json::json!({"decision": "reattach", "superseded": old_agent_id}),
             )
@@ -269,7 +280,7 @@ pub async fn enroll(
             .await?;
             (
                 id,
-                "pending_review",
+                "pending_review".to_owned(),
                 Some("suspect_clone"),
                 serde_json::json!({"decision": "pending_review", "possible_clone_of": possible_clone_of}),
             )
@@ -279,7 +290,7 @@ pub async fn enroll(
                 .await?;
             (
                 id,
-                "flagged",
+                "flagged".to_owned(),
                 None,
                 serde_json::json!({"decision": "flagged", "possible_clone_of": possible_clone_of}),
             )
@@ -343,7 +354,7 @@ pub async fn enroll(
             client_id: token.client_id,
             nats_url: state.nats_public_url.clone(),
             trust,
-            status: device_status.to_owned(),
+            status: device_status,
         }),
     ))
 }
@@ -367,6 +378,7 @@ mod tests {
         DeviceMatch {
             device_id: Uuid::from_u128(7),
             client_id: client,
+            device_status: "active".into(),
             agent_id: Some(Uuid::from_u128(8)),
             agent_status: Some("active".into()),
             last_seen: seen_hours_ago
@@ -415,6 +427,23 @@ mod tests {
             decide(&[held], &t, FpStrength::Strong, now),
             AttachDecision::PendingReview { .. }
         ));
+        for st in ["flagged", "pending_review"] {
+            let mut d = dm(c, Some(25));
+            d.device_status = st.into();
+            assert_eq!(
+                decide(&[d], &t, FpStrength::Strong, now),
+                AttachDecision::PendingReview {
+                    possible_clone_of: Uuid::from_u128(7)
+                }
+            );
+        }
+        assert_eq!(
+            decide(&[dm(c, Some(25))], &t, FpStrength::Strong, now),
+            AttachDecision::Reattach {
+                device_id: Uuid::from_u128(7),
+                old_agent_id: Some(Uuid::from_u128(8))
+            }
+        );
         assert!(matches!(
             decide(&[dm(other, Some(48))], &t, FpStrength::Strong, now),
             AttachDecision::NewFlagged { .. }

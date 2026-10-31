@@ -55,6 +55,8 @@ pub struct DeviceMatch {
     pub device_id: Uuid,
     /// Owning client.
     pub client_id: Uuid,
+    /// The device's own status: `active`, `pending_review` or `flagged`.
+    pub device_status: String,
     /// Newest non-superseded agent, if any.
     pub agent_id: Option<Uuid>,
     /// Status of that agent.
@@ -208,6 +210,7 @@ pub async fn find_devices_by_fingerprint(tx: &mut Tx<'_>, fp: &[u8]) -> Result<V
     let rows = sqlx::query_as!(
         DeviceMatch,
         r#"select d.id as "device_id!", d.client_id as "client_id!",
+                  d.status as "device_status!",
                   a.id as "agent_id?", a.status as "agent_status?", a.last_seen as "last_seen?"
            from tenant.device d
            left join lateral (
