@@ -1,8 +1,8 @@
 # Project State
 
 ## Current Position
-- **Phase**: 3 of 9 (executing)
-- **Status**: Phase 3 executing — Plan 03-05 failed
+- **Phase**: 3 of 9 (partial — 1 plan(s) failed)
+- **Status**: Phase 3 partial — 03-05 failed, stopped after wave 3, review needed
 - **Last Activity**: Plan 03-05 execution (2026-10-31)
 
 ## Progress
@@ -26,7 +26,7 @@
 - Foundation is broken into 9 Triad phases (design milestones M0-M8); product phases 2-6 come later
 
 ## Next Action
-Run `/triad:build` to execute Phase 3: Enrollment and NATS auth callout
+Fix the failed plans and run `/triad:build` again (completed plans are kept), or run `/triad:review`
 
 ## Phase 1 Results
 (build started 2026-10-31)
