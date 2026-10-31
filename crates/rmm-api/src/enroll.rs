@@ -67,8 +67,11 @@ pub fn decide(
     let mut reattach: Option<AttachDecision> = None;
     for m in matches.iter().filter(|m| m.client_id == token.client_id) {
         let recent = m.last_seen.is_some_and(|t| t.timestamp() > recent_cutoff);
-        let revoked = m.agent_status.as_deref() == Some("revoked");
-        if recent || revoked || !token.allow_reattach {
+        let held = matches!(
+            m.agent_status.as_deref(),
+            Some("revoked" | "suspect_clone")
+        );
+        if recent || held || !token.allow_reattach {
             return AttachDecision::PendingReview {
                 possible_clone_of: m.device_id,
             };
@@ -404,6 +407,12 @@ mod tests {
                 FpStrength::Strong,
                 now
             ),
+            AttachDecision::PendingReview { .. }
+        ));
+        let mut held = dm(c, None);
+        held.agent_status = Some("suspect_clone".into());
+        assert!(matches!(
+            decide(&[held], &t, FpStrength::Strong, now),
             AttachDecision::PendingReview { .. }
         ));
         assert!(matches!(
