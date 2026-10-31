@@ -183,9 +183,11 @@ version = "0.51.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4f92759f418774b78c36ef07885849150ce950c67d9bcdeff8a9c253f57d9a1"
 dependencies = [
+ "base64 0.22.1",
  "bytes",
  "futures-util",
  "memchr",
+ "nkeys",
  "pin-project",
  "portable-atomic",
  "rand 0.10.3",

@@ -70,8 +70,8 @@ pub async fn connect_observed(
     let public = kp.public_key();
     let kp = std::sync::Arc::new(kp);
 
-    // The async-nats `nkeys` feature is not enabled in this workspace, so the
-    // nonce is signed here with the same key pair (nkey user auth).
+    // Sign the server nonce with the agent key (nkey user auth). async-nats
+    // only sends the signature when its `nkeys` feature is enabled.
     let mut opts = ConnectOptions::with_auth_callback(move |nonce| {
         let kp = std::sync::Arc::clone(&kp);
         let public = public.clone();
