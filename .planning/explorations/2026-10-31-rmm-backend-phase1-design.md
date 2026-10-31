@@ -276,7 +276,7 @@ xtask/            msi, release-manifest draft, test vectors, openapi export
 4. **Timescale compression breaks RLS:** private schema plus scoped views.
 5. **RLS depends on a scope the app sets itself:** state in the threat model that it is defense in depth.
 6. **The build-phases embed is unrendered:** phase 1 is defined here; the six phases are needed for the roadmap.
-7. **Console login is unspecified:** assume Entra ID OIDC + PKCE with MFA through Conditional Access, plus WebAuthn for shells.
+7. **Console login is unspecified:** resolved: Entra ID OIDC + PKCE with MFA through Conditional Access, plus WebAuthn for shells.
 8. **VM clones with duplicate SMBIOS:** the fingerprint rules above now; TPM keys later.
 9. **Encrypted SQLite:** app-level AEAD instead of SQLCipher (metadata stays readable).
 10. **Command TTL vs offline delivery:** 10 min default, `max_queue_ttl` per definition.
@@ -285,21 +285,23 @@ xtask/            msi, release-manifest draft, test vectors, openapi export
 13. **Clock skew:** ±5 min tolerance, skew reported in the heartbeat.
 14. **MSI repair/upgrade can clobber the A/B slots:** the MSI owns only the watchdog and a bootstrap slot.
 15. **No Authenticode in phase 1:** Defender/SmartScreen may flag the agent; use an MDE indicator on internal machines.
-16. **Retention and privacy of session recordings:** unspecified.
+16. **Retention and privacy of session recordings:** resolved: 1 year, audited access.
 17. **JetStream consumer per agent at scale:** revisit before 10k agents.
 18. **Spec path mismatch** (`docs/spec.md` vs the root file): move the spec to `docs/spec.md` in M0.
 
 ## Open Questions
 
+Resolved in discussion (2026-10-31):
+- **Console login:** Entra ID OIDC + PKCE, MFA via Conditional Access (API validates Entra tokens; WebAuthn stays separate for shell co-sign).
+- **Revocation mirror:** deferred; `TrustManifest` reserves a `revocation_mirrors[]` field. Phase 1 relies on expiry + fail-closed.
+- **Session recordings:** retained 1 year, then purged by a scheduled job; access is audited.
+- **Shell authenticators:** hardware only. `rmm-sign techlist` enforces an AAGUID allowlist (YubiKey 5 series) and rejects synced passkeys.
+
 | Question | Resolution path |
 | --- | --- |
 | Paste the six build phases from the spec's embed | User provides; feeds ROADMAP.md at `/triad:start` |
-| Entra ID OIDC for technician console login? | User decision at start; default yes |
-| Out-of-band revocation mirror (static URL) acceptable? | User decision; default: defer, design keeps the slot |
 | App-level AEAD instead of SQLCipher? | Default yes; revisit if a compliance requirement demands full-file encryption |
-| Restrict shell co-sign to hardware authenticators (AAGUID allowlist)? | Default yes; confirm the YubiKey models in use |
 | Where the root key lives and who attends ceremonies | Owner decision before M1 dry run |
-| Session recording retention period | Owner decision before M6 |
 | E2E-encrypted shell after phase 1? | Confirmed deferred; field reserved |
 | ConPTY under LocalSystem in session 0 | Spike in M0/M1 via `test-windows` |
 | OpenPGP card EdDSA digest signing via `openpgp-card` | Week-1 spike; fallback PIV Ed25519 |
@@ -311,7 +313,8 @@ Greenfield Rust Cargo workspace (`ace027/custom-rmm`) for a security-first RMM b
 
 - **Crates:** `rmm-proto`, `rmm-trust`, `rmm-recipe`, `rmm-platform`, `rmm-agent-core`, `rmm-agent`, `rmm-watchdog`, `rmm-session`, `rmm-db`, `rmm-api`, `rmm-server` (api|ingest|authd|migrate), `rmm-sign`.
 - **Trust:** deterministic-CBOR DSSE-style envelopes; offline Ed25519 root plus a root-signed TrustManifest with multi-sig thresholds; YubiKey OpenPGP Ed25519 signing keys (daily + backup) for catalog/release/techlist/revocations; server command key that can only invoke signed definitions; expiring signed revocation list with fail-closed and seq rollback protection.
-- **Shell:** technician-co-signed WebAuthn grants verified on the agent.
+- **Shell:** technician-co-signed WebAuthn grants verified on the agent (hardware authenticators only, AAGUID allowlist); recordings kept 1 year.
+- **Auth:** Entra ID OIDC + PKCE for console/API login; revocation mirror deferred with a reserved manifest field.
 - **Agent:** Ed25519 key wrapped with DPAPI; NATS over WSS 443 with a Rust auth-callout service issuing scoped JWTs; per-agent JetStream command consumers.
 - **Data:** Postgres + TimescaleDB with RLS on `tenant.*`, and metrics in a private compressed hypertable behind scoped views.
 - **Dev and CI:** docker compose (Timescale, NATS, Nginx TLS); CI with lint, cargo-xwin Windows cross-compile, Linux tests and native Windows tests.
