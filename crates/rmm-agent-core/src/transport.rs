@@ -60,6 +60,11 @@ pub async fn connect_observed(
     extra_ca: Option<&Path>,
     events: UnboundedSender<ConnState>,
 ) -> Result<async_nats::Client, TransportError> {
+    // The agent links both rustls backends (ring via async-nats, aws-lc-rs via
+    // reqwest), so rustls cannot pick a process default; choose ring here.
+    // An Err only means a provider is already installed.
+    let _ = async_nats::rustls::crypto::ring::default_provider().install_default();
+
     let kp = KeyPair::new_from_raw(KeyPairType::User, *seed)
         .map_err(|e| TransportError(format!("nkey: {e}")))?;
     let public = kp.public_key();

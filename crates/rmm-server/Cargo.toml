@@ -8,6 +8,7 @@ publish.workspace = true
 version.workspace = true
 
 [dependencies]
+futures-util.workspace = true
 rmm-api.workspace = true
 rmm-db.workspace = true
 rmm-trust.workspace = true
