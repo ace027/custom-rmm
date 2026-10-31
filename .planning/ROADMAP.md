@@ -120,7 +120,7 @@
 
 | Phase | Plans | Completed | Status |
 |-------|-------|-----------|--------|
-| 1 | 3 | 0 | Planned |
+| 1 | 3 | 1 | In Progress |
 | 2 | 4 | 0 | Pending |
 | 3 | 4 | 0 | Pending |
 | 4 | 3 | 0 | Pending |
