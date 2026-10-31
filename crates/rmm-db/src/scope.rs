@@ -72,7 +72,7 @@ pub async fn connect_as(url: &str, role: &str) -> Result<PgPool, DbError> {
                 Ok(())
             })
         })
-        .connect(url)
+        .connect_with(crate::connect_options(url)?)
         .await?;
     Ok(pool)
 }

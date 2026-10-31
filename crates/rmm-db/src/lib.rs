@@ -6,7 +6,7 @@ pub mod scope;
 use std::time::{Duration, Instant};
 
 use sqlx::PgPool;
-use sqlx::postgres::PgPoolOptions;
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
 /// Name of the Postgres schema owned by the platform.
 pub const SCHEMA: &str = "rmm";
@@ -28,14 +28,27 @@ pub enum DbError {
     InvalidRole(String),
 }
 
+/// Connection options for `url` with `search_path` pinned to `public`.
+///
+/// The platform owns a schema named `rmm`, and the default search path is
+/// `"$user", public`. When the database user is also called `rmm`, unqualified
+/// names (sqlx's `_sqlx_migrations`) would resolve to `public` before the
+/// schema exists and to `rmm` afterwards, so migrations re-ran on every start.
+/// Platform queries always schema-qualify their tables.
+pub(crate) fn connect_options(url: &str) -> Result<PgConnectOptions, DbError> {
+    let opts: PgConnectOptions = url.parse()?;
+    Ok(opts.options([("search_path", "public")]))
+}
+
 /// Connect to Postgres, retrying for up to 30 seconds.
 pub async fn connect(url: &str) -> Result<PgPool, DbError> {
+    let opts = connect_options(url)?;
     let start = Instant::now();
     loop {
         let attempt = PgPoolOptions::new()
             .max_connections(10)
             .acquire_timeout(Duration::from_secs(5))
-            .connect(url)
+            .connect_with(opts.clone())
             .await;
         match attempt {
             Ok(pool) => return Ok(pool),
