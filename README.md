@@ -31,6 +31,10 @@ scripts/check-layering.sh      # enforce crate layering; scripts/test-layering.s
 cargo run -p xtask -- openapi  # regenerate docs/openapi.json (add --check to detect drift)
 ```
 
+## CI
+
+GitHub Actions runs lint, Windows cross-compilation, Linux tests and native Windows tests on every pull request. Reproduce the Linux jobs with `scripts/ci-local.sh`. See [docs/ci.md](docs/ci.md) and [docs/dev-environment.md](docs/dev-environment.md).
+
 ## Documents
 
 - Product spec: [docs/spec.md](docs/spec.md)
