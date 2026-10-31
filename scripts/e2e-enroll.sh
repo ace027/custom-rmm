@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # End-to-end enrollment against the dev stack: a debug Linux agent enrolls
 # through nginx, connects to NATS over WSS with an authd-issued JWT, and the
-# negative cases (token reuse, cross-tenant subjects, plain TCP, revocation)
+# negative cases (token reuse, cross-tenant subjects, plain TCP, revocation,
+# static users over the public WebSocket)
 # fail as they should. Reattach and clone flagging are checked last.
 #
 # The agent runs as root in a private mount namespace with a fake
-# /sys/class/dmi so the hardware fingerprint is strong and unique to this run
+# /sys/class/dmi per simulated machine so each fingerprint is strong and unique
 # (CI runners and containers either hide or lack DMI data). Needs root or
 # passwordless sudo, docker, cargo, curl and python3. Tears nothing down.
 set -euo pipefail
@@ -36,21 +37,29 @@ scripts/dev-up.sh
 cargo build -q --locked -p rmm-agent
 AGENT=$ROOT/target/debug/rmm-agent
 
-# Fake DMI for one simulated machine.
-FAKE=$WORK/sysclass
-mkdir -p "$FAKE/dmi/id"
-python3 -c 'import uuid; print(uuid.uuid4())' >"$FAKE/dmi/id/product_uuid"
-echo "E2E-SYS-$RANDOM$RANDOM" >"$FAKE/dmi/id/product_serial"
-echo "E2E-BRD-$RANDOM$RANDOM" >"$FAKE/dmi/id/board_serial"
-echo "RMM e2e" >"$FAKE/dmi/id/sys_vendor"
-echo "Simulated" >"$FAKE/dmi/id/product_name"
+# Fake DMI for simulated machines: each gets its own strong fingerprint.
+machine() {
+  local dir=$WORK/machine-$1
+  mkdir -p "$dir/dmi/id"
+  python3 -c 'import uuid; print(uuid.uuid4())' >"$dir/dmi/id/product_uuid"
+  echo "E2E-SYS-$RANDOM$RANDOM" >"$dir/dmi/id/product_serial"
+  echo "E2E-BRD-$RANDOM$RANDOM" >"$dir/dmi/id/board_serial"
+  echo "RMM e2e" >"$dir/dmi/id/sys_vendor"
+  echo "Simulated" >"$dir/dmi/id/product_name"
+}
+machine a
+machine b
 
-# The debug agent as root with the fake DMI mounted.
-# shellcheck disable=SC2016 # expanded by the inner sh
-AGENT_CMD=("${SUDO[@]}" env RMM_AGENT_EXTRA_CA="$CA" RUST_LOG="${RUST_LOG:-info}" NO_PROXY='*'
-  unshare --mount --propagation private
-  sh -c 'mount --bind "$1" /sys/class && shift && exec "$@"' sh "$FAKE" "$AGENT")
-agent() { "${AGENT_CMD[@]}" "$@"; }
+# agent_cmd <machine>: the debug agent as root with that machine's fake DMI.
+agent_cmd() {
+  # shellcheck disable=SC2016 # expanded by the inner sh
+  CMD=("${SUDO[@]}" env RMM_AGENT_EXTRA_CA="$CA" RUST_LOG="${RUST_LOG:-info}" NO_PROXY='*'
+    unshare --mount --propagation private
+    sh -c 'mount --bind "$1" /sys/class && shift && exec "$@"' sh "$WORK/machine-$1" "$AGENT")
+}
+agent_cmd a; AGENT_CMD_A=("${CMD[@]}")
+agent_cmd b; AGENT_CMD_B=("${CMD[@]}")
+agent() { "${AGENT_CMD_A[@]}" "$@"; }
 
 q() {
   "${COMPOSE[@]}" exec -T timescale psql -U rmm -d rmm -v ON_ERROR_STOP=1 -tAq \
@@ -72,10 +81,11 @@ new_token() {
   python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' <<<"$body"
 }
 
-# enroll <state-dir> <token>: prints "<agent_id> <status>".
+# enroll <state-dir> <token> [machine]: prints "<agent_id> <status>".
 enroll() {
-  local out
-  out=$(agent enroll --server "$SERVER" --token "$2" --state-dir "$1") || return $?
+  local out cmd=("${AGENT_CMD_A[@]}")
+  [[ ${3:-a} == b ]] && cmd=("${AGENT_CMD_B[@]}")
+  out=$("${cmd[@]}" enroll --server "$SERVER" --token "$2" --state-dir "$1") || return $?
   sed -n 's/^enrolled: agent_id=\([^ ]*\) status=\(.*\)$/\1 \2/p' <<<"$out"
 }
 
@@ -101,7 +111,7 @@ DIR_A=$WORK/agent-a
 TOKEN_A=$(new_token "$CA_ID" "$SA_ID" false)
 read -r AG_A STATUS_A < <(enroll "$DIR_A" "$TOKEN_A") || fail "enroll agent A"
 [[ $STATUS_A == active ]] || fail "agent A status $STATUS_A"
-timeout 30 "${AGENT_CMD[@]}" run --once --state-dir "$DIR_A" \
+timeout 30 "${AGENT_CMD_A[@]}" run --once --state-dir "$DIR_A" \
   || fail "agent A run --once"
 [[ $(q "select count(*) from msp.audit_event where action = 'nats.auth.allow' and target = 'agent:$AG_A'") -ge 1 ]] \
   || fail "no nats.auth.allow audit row for agent A"
@@ -117,8 +127,10 @@ pass "(2) reusing a single-use token exits 3"
 
 # (3) Agent of client A cannot touch client B's subjects.
 DIR_B=$WORK/agent-b
-read -r AG_B STATUS_B < <(enroll "$DIR_B" "$(new_token "$CB_ID" "$SB_ID" false)") || fail "enroll agent B"
-[[ $STATUS_B == flagged ]] || fail "agent B (same machine, other client) status $STATUS_B, want flagged"
+read -r AG_B STATUS_B < <(enroll "$DIR_B" "$(new_token "$CB_ID" "$SB_ID" false)" b) || fail "enroll agent B"
+[[ $STATUS_B == active ]] || fail "agent B (own machine) status $STATUS_B, want active"
+read -r _ STATUS_X < <(enroll "$WORK/agent-x" "$(new_token "$CB_ID" "$SB_ID" false)" a) || fail "enroll agent X"
+[[ $STATUS_X == flagged ]] || fail "agent X (machine A, other client) status $STATUS_X, want flagged"
 SEED_A=$WORK/agent-a.nk
 "${SUDO[@]}" python3 scripts/nkey-seed.py "$DIR_A/agent.key" >"$SEED_A"
 chmod 644 "$SEED_A"
@@ -144,7 +156,7 @@ pass "(4) agent key over nats://127.0.0.1:4222 fails authorization"
 # (5) Revocation kicks a connected agent within 5 s and blocks reconnects.
 LOG_A=$WORK/agent-a.log
 # Not via the agent() function: $! must be the agent process itself.
-"${AGENT_CMD[@]}" run --state-dir "$DIR_A" >"$LOG_A" 2>&1 &
+"${AGENT_CMD_A[@]}" run --state-dir "$DIR_A" >"$LOG_A" 2>&1 &
 BG_PID=$!
 for _ in $(seq 1 60); do
   grep -q 'nats connected' "$LOG_A" && break
@@ -164,7 +176,7 @@ done
 wait "$BG_PID" 2>/dev/null || true
 BG_PID=
 set +e
-timeout 15 "${AGENT_CMD[@]}" run --once --state-dir "$DIR_A" >/dev/null 2>&1
+timeout 15 "${AGENT_CMD_A[@]}" run --once --state-dir "$DIR_A" >/dev/null 2>&1
 rc=$?
 set -e
 [[ $rc -ne 0 ]] || fail "revoked agent connected again"
@@ -177,17 +189,26 @@ DEV_B=$(device_of "$AG_B")
 "${SUDO[@]}" rm -rf "$DIR_B"
 q "update tenant.agent set last_seen = now() - interval '25 hours' where id = '$AG_B'" >/dev/null
 DIR_B2=$WORK/agent-b2
-read -r AG_B2 STATUS_B2 < <(enroll "$DIR_B2" "$(new_token "$CB_ID" "$SB_ID" true)") || fail "re-enroll agent B"
+read -r AG_B2 STATUS_B2 < <(enroll "$DIR_B2" "$(new_token "$CB_ID" "$SB_ID" true)" b) || fail "re-enroll agent B"
 [[ $(device_of "$AG_B2") == "$DEV_B" ]] || fail "reattach gave a new device"
 [[ $(q "select status from tenant.agent where id = '$AG_B'") == superseded ]] || fail "old agent not superseded"
 pass "(6) reinstall reattaches to device $DEV_B (status $STATUS_B2)"
 
 # (7) A second copy while the reattached agent is fresh is held for review.
-timeout 30 "${AGENT_CMD[@]}" run --once --state-dir "$DIR_B2" \
+timeout 30 "${AGENT_CMD_B[@]}" run --once --state-dir "$DIR_B2" \
   || fail "agent B2 run --once"
-read -r AG_B3 STATUS_B3 < <(enroll "$WORK/agent-b3" "$(new_token "$CB_ID" "$SB_ID" true)") || fail "clone enroll"
+read -r AG_B3 STATUS_B3 < <(enroll "$WORK/agent-b3" "$(new_token "$CB_ID" "$SB_ID" true)" b) || fail "clone enroll"
 [[ $STATUS_B3 == pending_review ]] || fail "clone status $STATUS_B3, want pending_review"
 [[ $(q "select status from tenant.agent where id = '$AG_B3'") == suspect_clone ]] || fail "clone agent not suspect_clone"
 pass "(7) clone of a fresh agent is pending_review"
+
+# (8) The static `api` user must not authenticate over the public WebSocket.
+API_PW=$("${COMPOSE[@]}" exec -T api printenv RMM_NATS_PASSWORD)
+[[ -n $API_PW ]] || fail "api NATS password not found"
+out=$(docker run --rm --network host -v "$CA:/ca.pem:ro" natsio/nats-box:latest \
+  nats --tlsca /ca.pem --user api --password "$API_PW" --timeout 3s --server "$NATS_WSS" \
+  pub "e2e.static.user" x 2>&1 || true)
+grep -qi 'authorization violation' <<<"$out" || fail "static user api not refused over $NATS_WSS: $out"
+pass "(8) static user api over $NATS_WSS fails authorization"
 
 echo "e2e enrollment: all checks passed"

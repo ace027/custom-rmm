@@ -32,6 +32,12 @@ WebSocket), nginx with TLS, and the `rmm-server` processes `api`, `ingest`,
 | 4222 | NATS client | 127.0.0.1 |
 | 8222 | NATS monitoring | 127.0.0.1 |
 
+nginx rate-limits the public paths per client IP and answers 429 beyond the
+limits: `/nats` 10 requests/s (burst 20) and 50 concurrent connections,
+`/v1/enroll` 5 requests/s (burst 10). The static NATS users (`api`, `ingest`,
+`authd`, `sys`) accept plain TCP connections only and are refused on the
+WebSocket listener.
+
 ## Environment variables
 
 Defined in `deploy/.env` (dev-only values; never reuse them elsewhere):

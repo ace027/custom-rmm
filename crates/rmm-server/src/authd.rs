@@ -7,6 +7,15 @@
 //! WebSocket-only, one hour user JWT. Any failure is a deny with a generic
 //! message. authd also kicks connections of agents the API revokes.
 //!
+//! Cheap prechecks (JWT decode and server signature, websocket-only
+//! transport, nonce signature and nkey format) run before the database is
+//! touched. A request failing one is denied (or, if undecodable, left to
+//! time out) with no transaction and no audit row, so an unauthenticated
+//! flood cannot grow `msp.audit_event`; such denials are only counted per
+//! reason and summarized in a `warn!` at most every 10 s per reason. Only
+//! requests that proved key possession reach the agent lookup, where every
+//! decision is audited (2 s budget, any error is a deny).
+//!
 //! Two NATS connections: user `authd` (account RMM) receives callout
 //! requests and revocation notices; user `sys` (account SYS) runs the connz
 //! and kick requests.
@@ -14,8 +23,8 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use axum::{Router, extract::State, http::StatusCode, routing::get};
@@ -162,44 +171,133 @@ fn clip(s: &str) -> String {
     s.chars().take(64).collect()
 }
 
-/// The checks that need no database: proof of key possession and transport.
-fn precheck(req: &AuthRequest) -> std::result::Result<[u8; 32], String> {
-    let key = natsjwt::verify_nonce_signature(req).map_err(|e| e.to_string())?;
+/// Why a request was denied before the database was consulted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrecheckReason {
+    /// Not UTF-8, not a JWT, bad server signature, or not a callout request.
+    Undecodable,
+    /// Connection type other than websocket.
+    ConnType,
+    /// Missing or bad nonce signature, or a malformed nkey.
+    NonceSignature,
+}
+
+impl PrecheckReason {
+    fn index(self) -> usize {
+        self as usize
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Undecodable => "undecodable_request",
+            Self::ConnType => "connection_type_not_allowed",
+            Self::NonceSignature => "bad_nonce_signature",
+        }
+    }
+}
+
+/// A request that failed a precheck. It is denied without a database
+/// transaction and without an audit row; only [`PrecheckStats`] sees it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PrecheckDenial(PrecheckReason);
+
+/// A request that passed every check that needs no database.
+#[derive(Debug)]
+struct VerifiedRequest<'a> {
+    req: &'a AuthRequest,
+    /// Raw public key whose possession the client proved.
+    key: [u8; 32],
+}
+
+/// Minimum time between two log lines for the same precheck reason.
+const PRECHECK_LOG_EVERY: Duration = Duration::from_secs(10);
+
+/// Per-reason counters of precheck denials plus a rate-limited log summary.
+#[derive(Debug, Default)]
+struct PrecheckStats {
+    total: [AtomicU64; 3],
+    /// Per reason: when it was last logged and the total at that time.
+    logged: Mutex<[(Option<Instant>, u64); 3]>,
+}
+
+impl PrecheckStats {
+    /// Count a denial. Returns the number of denials of this reason since the
+    /// last time it returned `Some`, at most once per [`PRECHECK_LOG_EVERY`].
+    fn record(&self, reason: PrecheckReason, now: Instant) -> Option<u64> {
+        let i = reason.index();
+        let total = self.total[i].fetch_add(1, Ordering::Relaxed) + 1;
+        let mut logged = self.logged.lock().unwrap_or_else(PoisonError::into_inner);
+        let (last, at) = &mut logged[i];
+        if last.is_some_and(|t| now.saturating_duration_since(t) < PRECHECK_LOG_EVERY) {
+            return None;
+        }
+        let since = total - *at;
+        *last = Some(now);
+        *at = total;
+        Some(since)
+    }
+
+    fn count(&self, reason: PrecheckReason) -> u64 {
+        self.total[reason.index()].load(Ordering::Relaxed)
+    }
+
+    /// Count a denial and log the summary when it is due.
+    fn denied(&self, reason: PrecheckReason) {
+        if let Some(since) = self.record(reason, Instant::now()) {
+            tracing::warn!(
+                reason = reason.name(),
+                since_last_log = since,
+                total = self.count(reason),
+                "callout requests denied by prechecks (no audit row written)"
+            );
+        }
+    }
+}
+
+/// Decode the request and check the server's signature (no database).
+fn decode_request(payload: &[u8]) -> std::result::Result<AuthRequest, PrecheckDenial> {
+    let undecodable = PrecheckDenial(PrecheckReason::Undecodable);
+    let text = std::str::from_utf8(payload).map_err(|_| undecodable)?;
+    natsjwt::decode_authorization_request(text).map_err(|_| undecodable)
+}
+
+/// The checks on a decoded request that need no database: transport and
+/// proof of key possession.
+fn precheck(req: &AuthRequest) -> std::result::Result<VerifiedRequest<'_>, PrecheckDenial> {
     let ct = &req.client_info.conn_type;
     if !ct.is_empty() && !ct.eq_ignore_ascii_case("websocket") {
-        return Err(format!("connection type {} not allowed", clip(ct)));
+        return Err(PrecheckDenial(PrecheckReason::ConnType));
     }
-    Ok(key)
+    let key = natsjwt::verify_nonce_signature(req)
+        .map_err(|_| PrecheckDenial(PrecheckReason::NonceSignature))?;
+    Ok(VerifiedRequest { req, key })
 }
 
 /// Look up the agent, record the decision and commit, in one transaction.
 async fn decide_in_db(
     db: &Db,
-    req: &AuthRequest,
-    pre: std::result::Result<[u8; 32], String>,
+    verified: &VerifiedRequest<'_>,
 ) -> std::result::Result<Decision, DbError> {
+    let VerifiedRequest { req, key } = verified;
     let mut tx = (db.begin)().await?;
     let nkey_target = format!("nkey:{}", clip(&req.connect_opts.nkey));
-    let (decision, client_id, target) = match pre {
-        Err(reason) => (Decision::Deny(reason), None, nkey_target),
-        Ok(key) => match repo::agent_by_pubkey(&mut tx, &key).await? {
-            None => (Decision::Deny("unknown agent".into()), None, nkey_target),
-            Some(a) => {
-                let target = format!("agent:{}", a.agent_id);
-                let client = Some(a.client_id);
-                let d = if a.status != "active" {
-                    Decision::Deny(format!("agent status {}", a.status))
-                } else if a.client_status != "active" {
-                    Decision::Deny(format!("client status {}", a.client_status))
-                } else if a.nkey != req.connect_opts.nkey {
-                    Decision::Deny("stored nkey does not match".into())
-                } else {
-                    repo::touch_last_seen(&mut tx, a.agent_id).await?;
-                    Decision::Allow(a)
-                };
-                (d, client, target)
-            }
-        },
+    let (decision, client_id, target) = match repo::agent_by_pubkey(&mut tx, key).await? {
+        None => (Decision::Deny("unknown agent".into()), None, nkey_target),
+        Some(a) => {
+            let target = format!("agent:{}", a.agent_id);
+            let client = Some(a.client_id);
+            let d = if a.status != "active" {
+                Decision::Deny(format!("agent status {}", a.status))
+            } else if a.client_status != "active" {
+                Decision::Deny(format!("client status {}", a.client_status))
+            } else if a.nkey != req.connect_opts.nkey {
+                Decision::Deny("stored nkey does not match".into())
+            } else {
+                repo::touch_last_seen(&mut tx, a.agent_id).await?;
+                Decision::Allow(a)
+            };
+            (d, client, target)
+        }
     };
     let (action, reason) = match &decision {
         Decision::Allow(_) => ("nats.auth.allow", None),
@@ -219,12 +317,11 @@ async fn decide_in_db(
 }
 
 /// Decide one request; any error is a deny.
-async fn decide(db: Option<&Db>, req: &AuthRequest) -> Decision {
-    let pre = precheck(req);
+async fn decide(db: Option<&Db>, verified: &VerifiedRequest<'_>) -> Decision {
     let Some(db) = db else {
         return Decision::Deny("database not connected".into());
     };
-    match tokio::time::timeout(DB_TIMEOUT, decide_in_db(db, req, pre)).await {
+    match tokio::time::timeout(DB_TIMEOUT, decide_in_db(db, verified)).await {
         Ok(Ok(d)) => d,
         Ok(Err(err)) => Decision::Deny(format!("database error: {err}")),
         Err(_) => Decision::Deny("database timeout".into()),
@@ -233,17 +330,35 @@ async fn decide(db: Option<&Db>, req: &AuthRequest) -> Decision {
 
 /// Handle one raw callout request; returns the signed response, or `None`
 /// when the request cannot even be decoded (the server then times out and
-/// denies).
-async fn handle_request(payload: &[u8], issuer: &KeyPair, db: Option<&Db>) -> Option<Vec<u8>> {
-    let text = std::str::from_utf8(payload).ok()?;
-    let req = match natsjwt::decode_authorization_request(text) {
+/// denies). Requests failing a precheck are denied here, counted in `stats`,
+/// and never touch the database.
+async fn handle_request(
+    payload: &[u8],
+    issuer: &KeyPair,
+    db: Option<&Db>,
+    stats: &PrecheckStats,
+) -> Option<Vec<u8>> {
+    let req = match decode_request(payload) {
         Ok(r) => r,
-        Err(err) => {
-            tracing::warn!(%err, "undecodable authorization request");
+        Err(PrecheckDenial(reason)) => {
+            stats.denied(reason);
             return None;
         }
     };
-    let response = match decide(db, &req).await {
+    let verified = match precheck(&req) {
+        Ok(v) => v,
+        Err(PrecheckDenial(reason)) => {
+            stats.denied(reason);
+            let deny = natsjwt::authorization_response(
+                &req.user_nkey,
+                &req.server_id,
+                None,
+                Some(DENY_MESSAGE.into()),
+            );
+            return Some(natsjwt::encode_jwt(&deny, issuer).into_bytes());
+        }
+    };
+    let response = match decide(db, &verified).await {
         Decision::Allow(agent) => {
             tracing::info!(agent_id = %agent.agent_id, client_id = %agent.client_id, cid = req.client_info.cid, "nats auth allow");
             let claims = natsjwt::user_claims(&req.user_nkey, &agent, unix_now());
@@ -351,6 +466,7 @@ struct Callout {
     issuer: KeyPair,
     db: Arc<OnceLock<Db>>,
     permits: Arc<Semaphore>,
+    stats: PrecheckStats,
 }
 
 /// Answer callout requests until the subscription ends. async-nats
@@ -372,7 +488,8 @@ async fn serve_callout(
         let (state, client) = (state.clone(), client.clone());
         tokio::spawn(async move {
             let _permit = permit;
-            let resp = handle_request(&msg.payload, &state.issuer, state.db.get()).await;
+            let resp =
+                handle_request(&msg.payload, &state.issuer, state.db.get(), &state.stats).await;
             if let Some(resp) = resp
                 && let Err(err) = client.publish(reply, resp.into()).await
             {
@@ -479,6 +596,7 @@ pub async fn run() -> Result<()> {
         issuer,
         db: db.clone(),
         permits: Arc::new(Semaphore::new(MAX_IN_FLIGHT)),
+        stats: PrecheckStats::default(),
     });
     let tasks = [
         tokio::spawn(db_task(cfg.database_url.clone(), db, health.clone())),
@@ -553,10 +671,162 @@ mod tests {
         assert_eq!(natsjwt::agent_user_name(id), format!("agent:{id}"));
     }
 
+    /// `decide` on a request that must pass the prechecks.
+    async fn decide_req(db: Option<&Db>, req: &AuthRequest) -> Decision {
+        let verified = precheck(req).expect("request passes prechecks");
+        decide(db, &verified).await
+    }
+
     #[tokio::test]
     async fn no_database_means_deny() {
-        let req = AuthRequest::default();
-        assert!(matches!(decide(None, &req).await, Decision::Deny(_)));
+        let req = request(&KeyPair::new_user(), "websocket", true);
+        assert!(matches!(decide_req(None, &req).await, Decision::Deny(_)));
+    }
+
+    #[test]
+    fn precheck_denial_reasons() {
+        let key = KeyPair::new_user();
+        let ok = request(&key, "websocket", true);
+        let v = precheck(&ok).unwrap();
+        assert_eq!(
+            v.key,
+            natsjwt::public_key_bytes(&key.public_key(), PREFIX_USER).unwrap()
+        );
+        assert!(precheck(&request(&key, "", true)).is_ok());
+
+        let deny = |r: &AuthRequest| precheck(r).unwrap_err().0;
+        assert_eq!(deny(&request(&key, "nats", true)), PrecheckReason::ConnType);
+        assert_eq!(
+            deny(&request(&key, "websocket", false)),
+            PrecheckReason::NonceSignature
+        );
+        let mut r = ok.clone();
+        r.client_info.nonce.clear();
+        assert_eq!(deny(&r), PrecheckReason::NonceSignature);
+        let mut r = ok.clone();
+        r.connect_opts.sig.clear();
+        assert_eq!(deny(&r), PrecheckReason::NonceSignature);
+        let mut r = ok.clone();
+        r.connect_opts.nkey = "not-an-nkey".into();
+        assert_eq!(deny(&r), PrecheckReason::NonceSignature);
+        let mut r = ok;
+        r.connect_opts.nkey = KeyPair::new_account().public_key();
+        assert_eq!(deny(&r), PrecheckReason::NonceSignature);
+    }
+
+    #[test]
+    fn undecodable_requests_are_denied_early() {
+        let undecodable = PrecheckReason::Undecodable;
+        assert_eq!(decode_request(b"\xff\xfe").unwrap_err().0, undecodable);
+        assert_eq!(decode_request(b"not a jwt").unwrap_err().0, undecodable);
+        // Valid JWT shape but signed by a non-server key.
+        let user = KeyPair::new_user();
+        let claims = json!({"iss": user.public_key(), "nats": {"type": "authorization_request"}});
+        let jwt = natsjwt::encode_jwt(&claims, &user);
+        assert_eq!(decode_request(jwt.as_bytes()).unwrap_err().0, undecodable);
+    }
+
+    #[test]
+    fn precheck_stats_count_and_rate_limit_logs() {
+        let stats = PrecheckStats::default();
+        let t0 = Instant::now();
+        let r = PrecheckReason::ConnType;
+        assert_eq!(stats.record(r, t0), Some(1), "first denial logs");
+        assert_eq!(stats.record(r, t0 + Duration::from_secs(1)), None);
+        assert_eq!(stats.record(r, t0 + Duration::from_secs(9)), None);
+        assert_eq!(stats.count(r), 3);
+        // Another reason has its own budget.
+        assert_eq!(
+            stats.record(PrecheckReason::Undecodable, t0 + Duration::from_secs(1)),
+            Some(1)
+        );
+        // After 10 s the summary carries the denials since the last log.
+        assert_eq!(stats.record(r, t0 + Duration::from_secs(10)), Some(3));
+        assert_eq!(stats.record(r, t0 + Duration::from_secs(11)), None);
+        assert_eq!(stats.count(r), 5);
+    }
+
+    /// A database that counts how often a transaction is opened and fails it.
+    fn counting_db(begins: Arc<AtomicU64>) -> Db {
+        Db {
+            begin: Box::new(move || {
+                begins.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Err(DbError::InvalidRole("test".into())) })
+            }),
+            ping: Box::new(|| Box::pin(async { Ok(1) })),
+        }
+    }
+
+    fn signed_request(req: &AuthRequest, server: &KeyPair) -> String {
+        let claims = json!({
+            "sub": req.user_nkey,
+            "aud": "nats-authorization-request",
+            "nats": {
+                "type": "authorization_request",
+                "version": 2,
+                "user_nkey": req.user_nkey,
+                "server_id": {"id": server.public_key(), "name": "t"},
+                "client_info": {
+                    "host": req.client_info.host,
+                    "id": req.client_info.cid,
+                    "nonce": req.client_info.nonce,
+                    "type": req.client_info.conn_type,
+                },
+                "connect_opts": {"nkey": req.connect_opts.nkey, "sig": req.connect_opts.sig}
+            }
+        });
+        natsjwt::encode_jwt(&claims, server)
+    }
+
+    #[tokio::test]
+    async fn prechecked_denials_never_touch_the_database() {
+        let begins = Arc::new(AtomicU64::new(0));
+        let db = counting_db(begins.clone());
+        let stats = PrecheckStats::default();
+        let issuer = KeyPair::new_account();
+        let server = KeyPair::new_server();
+        let key = KeyPair::new_user();
+
+        // Wrong transport and bad signature: deny reply, no transaction.
+        for (conn, good, reason) in [
+            ("nats", true, PrecheckReason::ConnType),
+            ("websocket", false, PrecheckReason::NonceSignature),
+        ] {
+            let jwt = signed_request(&request(&key, conn, good), &server);
+            let resp = handle_request(jwt.as_bytes(), &issuer, Some(&db), &stats)
+                .await
+                .unwrap();
+            let v = natsjwt::decode_verified(
+                std::str::from_utf8(&resp).unwrap(),
+                natsjwt::PREFIX_ACCOUNT,
+            )
+            .unwrap();
+            assert_eq!(v["nats"]["error"], DENY_MESSAGE);
+            assert_eq!(stats.count(reason), 1);
+        }
+        // Undecodable (forged by a non-server key, and garbage): no reply.
+        let forged = signed_request(&request(&key, "websocket", true), &KeyPair::new_user());
+        for payload in [forged.as_bytes(), b"garbage".as_slice()] {
+            assert!(
+                handle_request(payload, &issuer, Some(&db), &stats)
+                    .await
+                    .is_none()
+            );
+        }
+        assert_eq!(stats.count(PrecheckReason::Undecodable), 2);
+        assert_eq!(begins.load(Ordering::SeqCst), 0, "database was touched");
+
+        // Control: a request that passes the prechecks does reach the database
+        // (which fails here, so it is denied).
+        let jwt = signed_request(&request(&key, "websocket", true), &server);
+        let resp = handle_request(jwt.as_bytes(), &issuer, Some(&db), &stats)
+            .await
+            .unwrap();
+        let v =
+            natsjwt::decode_verified(std::str::from_utf8(&resp).unwrap(), natsjwt::PREFIX_ACCOUNT)
+                .unwrap();
+        assert_eq!(v["nats"]["error"], DENY_MESSAGE);
+        assert_eq!(begins.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
@@ -577,7 +847,11 @@ mod tests {
             }
         });
         let jwt = natsjwt::encode_jwt(&claims, &server);
-        let resp = handle_request(jwt.as_bytes(), &issuer, None).await.unwrap();
+        let stats = PrecheckStats::default();
+        let resp = handle_request(jwt.as_bytes(), &issuer, None, &stats)
+            .await
+            .unwrap();
+        assert_eq!(stats.count(PrecheckReason::NonceSignature), 1);
         let resp = String::from_utf8(resp).unwrap();
         let v = natsjwt::decode_verified(&resp, natsjwt::PREFIX_ACCOUNT).unwrap();
         assert_eq!(v["aud"], server.public_key());
@@ -737,7 +1011,7 @@ mod tests {
 
         // Active agent: allowed, audited, last_seen touched by the allow path.
         let ok = seed_agent(&admin, client, site, None).await;
-        match decide(Some(&authd), &request(&ok.key, "websocket", true)).await {
+        match decide_req(Some(&authd), &request(&ok.key, "websocket", true)).await {
             Decision::Allow(a) => {
                 assert_eq!(a.agent_id, ok.agent_id);
                 assert_eq!(a.client_id, ok.client_id);
@@ -749,7 +1023,7 @@ mod tests {
         assert_eq!(audits(&admin, "nats.auth.deny", &target).await, 0);
         // An empty connection type (older servers) is also accepted.
         assert!(matches!(
-            decide(Some(&authd), &request(&ok.key, "", true)).await,
+            decide_req(Some(&authd), &request(&ok.key, "", true)).await,
             Decision::Allow(_)
         ));
 
@@ -761,7 +1035,7 @@ mod tests {
             let a = seed_agent(&admin, client, site, None).await;
             set_status(&admin, a.agent_id, &["active"], status).await;
             denied(
-                &decide(Some(&authd), &request(&a.key, "websocket", true)).await,
+                &decide_req(Some(&authd), &request(&a.key, "websocket", true)).await,
                 needle,
             );
             let target = format!("agent:{}", a.agent_id);
@@ -781,7 +1055,7 @@ mod tests {
         let sup = seed_agent(&admin, client, site, None).await;
         set_status(&admin, sup.agent_id, &["active"], "superseded").await;
         denied(
-            &decide(Some(&authd), &request(&sup.key, "websocket", true)).await,
+            &decide_req(Some(&authd), &request(&sup.key, "websocket", true)).await,
             "superseded",
         );
 
@@ -798,7 +1072,7 @@ mod tests {
             tx.commit().await.unwrap();
         }
         denied(
-            &decide(Some(&authd), &request(&susp.key, "websocket", true)).await,
+            &decide_req(Some(&authd), &request(&susp.key, "websocket", true)).await,
             "client status disabled",
         );
         let target = format!("agent:{}", susp.agent_id);
@@ -808,7 +1082,7 @@ mod tests {
         let other = KeyPair::new_user().public_key();
         let mism = seed_agent(&admin, client, site, Some(other)).await;
         denied(
-            &decide(Some(&authd), &request(&mism.key, "websocket", true)).await,
+            &decide_req(Some(&authd), &request(&mism.key, "websocket", true)).await,
             "nkey does not match",
         );
         let target = format!("agent:{}", mism.agent_id);
@@ -817,26 +1091,19 @@ mod tests {
         // Unknown key: denied, audited against the presented nkey.
         let stranger = KeyPair::new_user();
         denied(
-            &decide(Some(&authd), &request(&stranger, "websocket", true)).await,
+            &decide_req(Some(&authd), &request(&stranger, "websocket", true)).await,
             "unknown agent",
         );
         let target = format!("nkey:{}", clip(&stranger.public_key()));
         assert_eq!(audits(&admin, "nats.auth.deny", &target).await, 1);
 
-        // Bad signature and wrong transport never reach an allow, even for an
-        // active agent, and are audited.
+        // Bad signature and wrong transport fail the prechecks, so they never
+        // reach the database: no allow and no audit row either.
         let a = seed_agent(&admin, client, site, None).await;
         let nkey_target = format!("nkey:{}", clip(&a.key.public_key()));
-        denied(
-            &decide(Some(&authd), &request(&a.key, "websocket", false)).await,
-            "signature",
-        );
-        assert_eq!(audits(&admin, "nats.auth.deny", &nkey_target).await, 1);
-        denied(
-            &decide(Some(&authd), &request(&a.key, "nats", true)).await,
-            "connection type",
-        );
-        assert_eq!(audits(&admin, "nats.auth.deny", &nkey_target).await, 2);
+        assert!(precheck(&request(&a.key, "websocket", false)).is_err());
+        assert!(precheck(&request(&a.key, "nats", true)).is_err());
+        assert_eq!(audits(&admin, "nats.auth.deny", &nkey_target).await, 0);
         assert_eq!(
             audits(&admin, "nats.auth.allow", &format!("agent:{}", a.agent_id)).await,
             0

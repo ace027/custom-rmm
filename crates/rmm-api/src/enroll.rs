@@ -50,10 +50,13 @@ pub enum AttachDecision {
 
 /// Choose how to attach an enrollment. Pure.
 ///
-/// A weak fingerprint never matches. A strong match in the token's client
-/// reattaches only when the device itself is `active`, the token allows it and
-/// the old agent has not been seen for 24 hours (or was never seen); otherwise the new device waits for
-/// review. A match in another client is never reattached.
+/// A weak fingerprint never matches. Only `active` devices in the token's
+/// client can be reattached: one is reattached when the token allows it and
+/// its agent has not been seen for 24 hours (or was never seen) and is not
+/// revoked or held as a clone; any other active match makes the new device
+/// wait for review. Same-client devices already `flagged` or `pending_review`
+/// are never reattached; when they are the only same-client matches, the new
+/// device also waits for review. A match in another client is never reattached.
 pub fn decide(
     matches: &[DeviceMatch],
     token: &TokenRow,
@@ -64,12 +67,12 @@ pub fn decide(
         return AttachDecision::New;
     }
     let recent_cutoff = now.timestamp() - RECENT_HOURS * 3600;
+    let same_client = || matches.iter().filter(|m| m.client_id == token.client_id);
     let mut reattach: Option<AttachDecision> = None;
-    for m in matches.iter().filter(|m| m.client_id == token.client_id) {
+    for m in same_client().filter(|m| m.device_status == "active") {
         let recent = m.last_seen.is_some_and(|t| t.timestamp() > recent_cutoff);
         let held = matches!(m.agent_status.as_deref(), Some("revoked" | "suspect_clone"));
-        let device_active = m.device_status == "active";
-        if recent || held || !device_active || !token.allow_reattach {
+        if recent || held || !token.allow_reattach {
             return AttachDecision::PendingReview {
                 possible_clone_of: m.device_id,
             };
@@ -83,6 +86,11 @@ pub fn decide(
     }
     if let Some(r) = reattach {
         return r;
+    }
+    if let Some(m) = same_client().next() {
+        return AttachDecision::PendingReview {
+            possible_clone_of: m.device_id,
+        };
     }
     match matches.iter().find(|m| m.client_id != token.client_id) {
         Some(m) => AttachDecision::NewFlagged {
@@ -439,6 +447,18 @@ mod tests {
         }
         assert_eq!(
             decide(&[dm(c, Some(25))], &t, FpStrength::Strong, now),
+            AttachDecision::Reattach {
+                device_id: Uuid::from_u128(7),
+                old_agent_id: Some(Uuid::from_u128(8))
+            }
+        );
+        // A flagged sibling with the same fingerprint neither blocks nor
+        // receives the reattach to the active original.
+        let mut flagged = dm(c, Some(25));
+        flagged.device_id = Uuid::from_u128(9);
+        flagged.device_status = "flagged".into();
+        assert_eq!(
+            decide(&[flagged, dm(c, Some(25))], &t, FpStrength::Strong, now),
             AttachDecision::Reattach {
                 device_id: Uuid::from_u128(7),
                 old_agent_id: Some(Uuid::from_u128(8))
