@@ -1,9 +1,9 @@
 # Project State
 
 ## Current Position
-- **Phase**: 0 of 9 (not started)
-- **Status**: Initialized — ready for `/triad:plan 1`
-- **Last Activity**: Project initialization (2026-10-31)
+- **Phase**: 1 of 9 (planned)
+- **Status**: Phase 1 planned -- 3 plans across 3 waves
+- **Last Activity**: Phase 1 planning (2026-10-31)
 
 ## Progress
 ```
@@ -26,4 +26,4 @@
 - Foundation is broken into 9 Triad phases (design milestones M0-M8); product phases 2-6 come later
 
 ## Next Action
-Run `/triad:plan 1` to begin Phase 1: Workspace, dev environment and CI
+Run `/triad:build` to execute Phase 1: Workspace, dev environment and CI
