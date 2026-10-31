@@ -1,13 +1,13 @@
 # Project State
 
 ## Current Position
-- **Phase**: 1 of 9 (partial — 1 plan(s) failed)
-- **Status**: Phase 1 partial — 01-03 failed, stopped after wave 3, review needed
+- **Phase**: 1 of 9 (executing)
+- **Status**: Phase 1 executing — Plan 01-03 complete
 - **Last Activity**: Plan 01-03 execution (2026-10-31)
 
 ## Progress
 ```
-[#...................] 6% — 2/29 plans complete
+[##..................] 10% — 3/29 plans complete
 ```
 
 ## Recent Decisions
@@ -33,3 +33,4 @@ Fix the failed plans and run `/triad:build` again (completed plans are kept), or
 - Plan 01-01 (Wave 1): Workspace skeleton, layering and Windows cross-build — Complete
 - Plan 01-02 (Wave 2): Docker compose dev environment and server stubs — Complete
 - Plan 01-03 (Wave 3): GitHub Actions CI — PARTIAL: ci.yml, ci-local.sh, docs/ci.md and the README CI section are written. actionlint is clean, and windows-cross and test-linux pass locally. `ci-local.sh lint` fails at `cargo deny check` on an advisory
+- Plan 01-03 (Wave 3): GitHub Actions CI — Complete
