@@ -1,7 +1,7 @@
 ---
 phase: 03-enrollment-and-nats-auth-callout
 compacted: 2026-10-31
-original_summaries: [03-01-SUMMARY.md, 03-02-SUMMARY.md, 03-03-SUMMARY.md, 03-04-SUMMARY.md]
+original_summaries: [03-01-SUMMARY.md, 03-02-SUMMARY.md, 03-03-SUMMARY.md, 03-04-SUMMARY.md, 03-05-SUMMARY.md]
 requirements_satisfied: [REQ-08, REQ-09, REQ-20, REQ-10]
 ---
 
@@ -12,6 +12,7 @@ requirements_satisfied: [REQ-08, REQ-09, REQ-20, REQ-10]
 - 03-02 Device identity: key store, hardware facts and shared enrollment types (Complete): Cargo.lock, Cargo.toml, crates/rmm-agent-core/Cargo.toml, crates/rmm-agent/Cargo.toml, crates/rmm-api/Cargo.toml, crates/rmm-platform/Cargo.toml, crates/rmm-platform/src/keystore.rs, crates/rmm-platform/src/lib.rs, crates/rmm-platform/src/linux.rs, crates/rmm-platform/src/macos.rs, crates/rmm-platform/src/smbios.rs, crates/rmm-platform/src/windows.rs, crates/rmm-proto/Cargo.toml, crates/rmm-proto/src/enroll.rs, crates/rmm-proto/src/lib.rs, crates/rmm-server/Cargo.toml
 - 03-03 Enrollment API, Entra auth and trust artifact upload (Complete): crates/rmm-api/src/admin.rs, crates/rmm-api/src/auth.rs, crates/rmm-api/src/enroll.rs, crates/rmm-api/src/lib.rs, crates/rmm-api/src/state.rs, crates/rmm-api/tests/auth.rs, crates/rmm-api/tests/enroll.rs, crates/rmm-server/src/api.rs, crates/rmm-server/src/dev_token.rs, crates/rmm-server/src/main.rs, docs/openapi.json, docs/runbooks/entra-setup.md
 - 03-04 Agent enroll and connect (Complete): crates/rmm-agent-core/src/enroll.rs, crates/rmm-agent-core/src/identity.rs, crates/rmm-agent-core/src/lib.rs, crates/rmm-agent-core/src/transport.rs, crates/rmm-agent-core/tests/enroll_client.rs, crates/rmm-agent/src/main.rs
+- 03-05 NATS auth callout service and end-to-end enrollment (Complete with Warnings): crates/rmm-server/src/authd.rs, crates/rmm-server/src/natsjwt.rs, scripts/dev-up.sh, scripts/e2e-enroll.sh
 
 ## Decisions
 - 03-01: tenant.client policy uses id = ANY(rmm.scope()), since the table has no client_id column
@@ -26,6 +27,7 @@ requirements_satisfied: [REQ-08, REQ-09, REQ-20, REQ-10]
 - 03-04: `enroll(server, token, keystore, platform, http, &EnrollOptions)` returns `Enrolled { identity, status }`. The extra argument carries `state_dir`, `force` and t
 - 03-04: The `async-nats` `nkeys` feature is not enabled in the workspace, so `ConnectOptions::nkey` does not exist. `transport.rs` uses `with_auth_callback` and signs t
 - 03-04: The release-build guard is a const `assert!` on `option_env!("RMM_ROOT_PUBKEYS").is_some()` under `cfg(not(debug_assertions))`, not a literal `compile_error!`, 
+- 03-05: authd finds a revoked agent's connections by the JWT `name` (`agent:<uuid>`) that authd itself signs, so a client cannot spoof it; the `nkey` field of the revok
 
 ## Conventions and Open Questions
 - 03-01 convention: Use begin_scoped(pool, &Scope, actor) on a pool from connect_as(url, "rmm_api" or "rmm_authd"). Enrollment must run under Scope::Service, because the token look
@@ -40,6 +42,8 @@ requirements_satisfied: [REQ-08, REQ-09, REQ-20, REQ-10]
 - 03-04 convention: Identity files are `identity.json` and `trust/{manifest,revocations,techlist}.env`, which are the raw envelope bytes. The key is `agent.key` in the state dir.
 - 03-04 convention: The server contract the agent assumes is `POST {server}/v1/enroll` with an `EnrollRequest` JSON body. 200 returns `EnrollResponse`
 - 03-04 convention: 401 means the token was rejected
+- 03-05 convention: Agent NATS user name is `natsjwt::agent_user_name(agent_id)` = `agent:<uuid>`
+- 03-05 convention: it appears in NATS logs and connz as the authorized user.
 
 ## Files Modified
 | File | Change |
@@ -97,15 +101,32 @@ requirements_satisfied: [REQ-08, REQ-09, REQ-20, REQ-10]
 | `crates/rmm-agent-core/src/transport.rs` | 03-04: Agent enroll and connect |
 | `crates/rmm-agent-core/tests/enroll_client.rs` | 03-04: Agent enroll and connect |
 | `crates/rmm-agent/src/main.rs` | 03-04: Agent enroll and connect |
+| `crates/rmm-server/src/authd.rs` | 03-05: NATS auth callout service and end-to-end enrollment |
+| `crates/rmm-server/src/natsjwt.rs` | 03-05: NATS auth callout service and end-to-end enrollment |
+| `scripts/dev-up.sh` | 03-05: NATS auth callout service and end-to-end enrollment |
+| `scripts/e2e-enroll.sh` | 03-05: NATS auth callout service and end-to-end enrollment |
 
 ## Verification
 - 03-01 (REQ-08, REQ-09): 7/7 verification commands passed
 - 03-02 (REQ-08, REQ-09): 10/10 verification commands passed
 - 03-03 (REQ-08, REQ-09, REQ-20): 10/10 verification commands passed
 - 03-04 (REQ-08, REQ-10): 9/9 verification commands passed
+- 03-05 (REQ-10, REQ-08, REQ-09): 12/12 verification commands passed
 
 ## Agents
 - 03-01: engineering-backend-architect
 - 03-02: engineering-senior-developer
 - 03-03: engineering-backend-architect
 - 03-04: engineering-senior-developer
+- 03-05: engineering-security-engineer
+
+## Also Covered
+- crates/rmm-server/tests/natsjwt.rs
+- deploy/nats/nats.conf
+- deploy/compose.yaml
+- deploy/.env.example
+- scripts/nkey-seed.py
+- .github/workflows/ci.yml
+- scripts/ci-local.sh
+- docs/dev-environment.md
+- docs/runbooks/windows-enroll-check.md

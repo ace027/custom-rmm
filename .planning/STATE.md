@@ -1,13 +1,13 @@
 # Project State
 
 ## Current Position
-- **Phase**: 3 of 9 (partial — 1 plan(s) failed)
-- **Status**: Phase 3 partial — 03-05 failed, stopped after wave 3, review needed
+- **Phase**: 3 of 9 (executing)
+- **Status**: Phase 3 executing — Plan 03-05 complete
 - **Last Activity**: Plan 03-05 execution (2026-10-31)
 
 ## Progress
 ```
-[#######.............] 36% — 11/30 plans complete
+[########............] 40% — 12/30 plans complete
 ```
 
 ## Recent Decisions
@@ -51,3 +51,4 @@ Fix the failed plans and run `/triad:build` again (completed plans are kept), or
 - Plan 03-04 (Wave 2): Agent enroll and connect — Complete
 - Plan 03-05 (Wave 3): NATS auth callout service and end-to-end enrollment — BLOCKED: The disk problem is fixed, but scripts/e2e-enroll.sh cannot pass until the agent's rustls provider bug is fixed in crates/rmm-agent-core, which is outside this plan's files.
 - Plan 03-05 (Wave 3): NATS auth callout service and end-to-end enrollment — BLOCKED: The fix is to add "nkeys" to the async-nats features in the root Cargo.toml (`features = ["websockets", "ring", "server_2_11", "nkeys"]`) and update Cargo.lock. Both files are forbidden to this plan. 
+- Plan 03-05 (Wave 3): NATS auth callout service and end-to-end enrollment — Complete with Warnings
