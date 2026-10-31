@@ -7,9 +7,9 @@ Workflow: `.github/workflows/ci.yml`. It runs on pull requests and on pushes to 
 | Job | Runner | Purpose | Commands |
 | --- | --- | --- | --- |
 | lint | ubuntu-24.04 | Formatting, lints, licences/advisories, crate layering, API spec drift | `cargo fmt --all --check`; `cargo clippy --workspace --all-targets --locked -- -D warnings`; `cargo deny check`; `scripts/check-layering.sh`; `scripts/test-layering.sh`; `cargo run -q -p xtask -- openapi --check` |
-| windows-cross | ubuntu-24.04 | Agent-side crates compile and lint cleanly for Windows | `cargo xwin clippy` for x86_64-pc-windows-msvc; `cargo xwin build` of rmm-agent alone, then of the other crates; `scripts/check-agent-no-sign.sh`; `cargo xwin check` for aarch64-pc-windows-msvc |
+| windows-cross | ubuntu-24.04 | Agent-side crates compile and lint cleanly for Windows | `cargo xwin clippy` for x86_64-pc-windows-msvc; `cargo xwin build` of rmm-agent alone, then of the other crates; `scripts/check-agent-no-sign.sh` |
 | test-linux | ubuntu-24.04 | Unit tests, dev-stack smoke test, sqlx offline data check | `cargo test --workspace --locked`; `scripts/smoke-dev.sh` (port 8443); `cargo sqlx prepare --workspace --check` |
-| test-windows | windows-2025 | Native tests of the agent-side crates | `cargo test --locked -p ...`; `cargo build --locked -p rmm-agent`; `cargo build --locked -p rmm-sign` |
+| test-windows | windows-2025 | Native tests of the agent-side crates | `cargo test --locked -p ...`; `cargo build --locked -p rmm-agent`; `cargo build --locked -p rmm-sign`; `cargo check` for aarch64-pc-windows-msvc (cargo-xwin cannot build ring/aws-lc-sys aarch64 assembly from Linux) |
 
 lint, windows-cross and test-linux first run `apt-get install libpcsclite-dev pkg-config`: rmm-sign's default `card` feature links the PC/SC library (`pcsc-sys`) on Linux. Windows uses the system WinSCard and needs nothing extra. Locally, install `libpcsclite-dev` (Debian/Ubuntu) or `pcsc-lite-devel` (Fedora), or build with `--no-default-features` to leave the card backend out.
 

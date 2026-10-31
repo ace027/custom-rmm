@@ -29,8 +29,7 @@ job_windows_cross() {
   run cargo xwin build --target x86_64-pc-windows-msvc \
     -p rmm-watchdog -p rmm-session -p rmm-sign --locked
   run scripts/check-agent-no-sign.sh
-  run cargo xwin check --target aarch64-pc-windows-msvc \
-    -p rmm-agent -p rmm-watchdog --locked
+  # The aarch64 Windows check runs only in CI's test-windows job (native MSVC).
   test -f target/x86_64-pc-windows-msvc/debug/rmm-agent.exe
 }
 

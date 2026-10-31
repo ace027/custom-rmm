@@ -74,10 +74,6 @@ jobs:
           -p rmm-watchdog -p rmm-session -p rmm-sign --locked
       - name: Agent contains no signing code
         run: scripts/check-agent-no-sign.sh
-      - name: Check (aarch64 Windows)
-        run: >-
-          cargo xwin check --target aarch64-pc-windows-msvc
-          -p rmm-agent -p rmm-watchdog --locked
       - uses: actions/upload-artifact@v4
         with:
           name: rmm-agent-windows-x64
@@ -133,3 +129,9 @@ jobs:
       - run: cargo test --locked -p rmm-proto -p rmm-trust -p rmm-recipe -p rmm-platform -p rmm-agent-core -p rmm-agent -p rmm-watchdog -p rmm-session
       - run: cargo build --locked -p rmm-agent
       - run: cargo build --locked -p rmm-sign
+      # ARM64 is checked natively: cargo-xwin's flags break ring's and
+      # aws-lc-sys's aarch64 assembly builds when cross-compiling from Linux.
+      - name: Check (aarch64 Windows)
+        run: |
+          rustup target add aarch64-pc-windows-msvc
+          cargo check --locked --target aarch64-pc-windows-msvc -p rmm-agent -p rmm-watchdog
