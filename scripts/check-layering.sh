@@ -62,4 +62,13 @@ for c in rmm-proto rmm-trust rmm-recipe; do
   fi
 done
 
+# deny.toml ignores two advisories that only `age` brings in; keep it off endpoints.
+for c in rmm-agent rmm-agent-core rmm-watchdog rmm-session; do
+  if tree "$c" | grep -qE '^age '; then
+    report FAIL "$c must not depend on age"
+  else
+    report PASS "$c does not depend on age"
+  fi
+done
+
 exit "$fail"

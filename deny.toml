@@ -28,6 +28,17 @@ deny = [
 ]
 
 [advisories]
+# Both advisories reach the build only through `age` 0.12, which only rmm-sign
+# (the offline signing CLI) uses; scripts/check-layering.sh keeps `age` out of
+# the agent. Remove these when an `age` release drops the affected versions.
+ignore = [
+    # i18n-config (age's localisation dependency): no fixed version available.
+    { id = "RUSTSEC-2026-0374", reason = "rmm-sign only (offline CLI), via age" },
+    # crypto-bigint 0.5.5 constant-time issues, reached through age's mandatory
+    # P-256 dependency. rmm-sign uses only age's scrypt passphrase recipient,
+    # which never runs P-256 arithmetic.
+    { id = "RUSTSEC-2026-0387", reason = "rmm-sign only (offline CLI); P-256 path unused" },
+]
 
 [sources]
 unknown-registry = "deny"
