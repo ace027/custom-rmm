@@ -1,13 +1,13 @@
 # Project State
 
 ## Current Position
-- **Phase**: 3 of 9 (planned)
-- **Status**: Phase 3 planned -- 5 plans across 3 waves
-- **Last Activity**: Phase 3 planning (2026-10-31)
+- **Phase**: 3 of 9 (executing)
+- **Status**: Phase 3 executing — Plan 03-02 complete
+- **Last Activity**: Plan 03-02 execution (2026-10-31)
 
 ## Progress
 ```
-[####................] 24% — 7/29 plans complete
+[######..............] 30% — 9/30 plans complete
 ```
 
 ## Recent Decisions
@@ -42,3 +42,8 @@ Run `/triad:build` to execute Phase 3: Enrollment and NATS auth callout
 - Plan 02-03 (Wave 2): WebAuthn assertion verification — Complete
 - Plan 02-04 (Wave 3): rmm-sign CLI, YubiKey backend, runbooks and agent no-sign check — PARTIAL: The rmm-sign CLI, card backend, runbooks, agent no-sign check and CI wiring are done and verified. The one failing gate is `scripts/ci-local.sh lint`, which stops at `cargo deny check` on two advisori
 - Plan 02-04 (Wave 3): rmm-sign CLI, YubiKey backend, runbooks and agent no-sign check — Complete
+
+## Phase 3 Results
+(build started 2026-10-31)
+- Plan 03-01 (Wave 1): Identity schema, RLS and repositories — Complete
+- Plan 03-02 (Wave 1): Device identity: key store, hardware facts and shared enrollment types — Complete
