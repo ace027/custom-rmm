@@ -24,6 +24,7 @@
 - Entra ID OIDC for technician login; recordings retained 1 year; revocation mirror deferred
 - Root key generated air-gapped, age-encrypted on two USB sticks (safe + offsite)
 - Foundation is broken into 9 Triad phases (design milestones M0-M8); product phases 2-6 come later
+- Open a pull request for the working branch through the GitHub MCP tools so CI runs on every push (replaces the earlier "no PR" default; gh CLI is not available)
 
 ## Next Action
 Run `/triad:review` to verify Phase 3: Enrollment and NATS auth callout
