@@ -1,8 +1,8 @@
 # Project State
 
 ## Current Position
-- **Phase**: 3 of 9 (executed, pending review)
-- **Status**: Phase 3 review stale — the same 0 finding(s) after 3 cycles
+- **Phase**: 3 of 9 (complete)
+- **Status**: Phase 3 complete — review passed (1 cycle(s))
 - **Last Activity**: Phase 3 review (2026-10-31)
 
 ## Progress
@@ -27,7 +27,7 @@
 - Open a pull request for the working branch through the GitHub MCP tools so CI runs on every push (replaces the earlier "no PR" default; gh CLI is not available)
 
 ## Next Action
-Fix the unresolved findings in 03-REVIEW.md, accept the phase as is, or re-plan; then run `/triad:review --phase 3`
+Run `/triad:plan 4` to plan Phase 4: Heartbeat, inventory and metrics
 
 ## Phase 1 Results
 (build started 2026-10-31)

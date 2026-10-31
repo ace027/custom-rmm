@@ -4,7 +4,7 @@
 
 - [x] Phase 1: Workspace, dev environment and CI (3 plans)
 - [x] Phase 2: Trust core and signing CLI (4 plans)
-- [ ] Phase 3: Enrollment and NATS auth callout (4 plans)
+- [x] Phase 3: Enrollment and NATS auth callout (4 plans)
 - [ ] Phase 4: Heartbeat, inventory and metrics (3 plans)
 - [ ] Phase 5: Encrypted local store and offline sync (2 plans)
 - [ ] Phase 6: Signed commands and first catalog action (4 plans)
@@ -122,7 +122,7 @@
 |-------|-------|-----------|--------|
 | 1 | 3 | 3 | Complete |
 | 2 | 4 | 4 | Complete |
-| 3 | 5 | 5 | Executed |
+| 3 | 5 | 5 | Complete |
 | 4 | 3 | 0 | Pending |
 | 5 | 2 | 0 | Pending |
 | 6 | 4 | 0 | Pending |
