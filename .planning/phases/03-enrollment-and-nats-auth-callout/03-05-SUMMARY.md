@@ -1,17 +1,16 @@
 # Plan 03-05 Summary: NATS auth callout service and end-to-end enrollment
 
 ## Result
-**Status**: BLOCKED
+**Status**: Complete with Warnings
 **Wave**: 3
 **Agent**: engineering-security-engineer
 **Completed**: 2026-10-31
-**Failure Class**: BLOCKER — $ scripts/e2e-enroll.sh (exit 1)
 
 ## Agent Selection Rationale
 
 | Candidate | Semantic | Heuristic | Memory | Total | Source |
 |-----------|----------|-----------|--------|-------|--------|
-| engineering-security-engineer | — | 9 | 2.83 | 11.83 | mandatory |
+| engineering-security-engineer | — | 9 | 2.75 | 11.75 | mandatory |
 | engineering-infrastructure-devops | — | 22 | 3.67 | 25.67 | heuristic |
 | engineering-senior-developer | — | 21 | 4.14 | 25.14 | heuristic |
 
@@ -23,18 +22,21 @@
 ## Completed Tasks
 - [x] Task 1: NATS JWT encoding and callout handler (done)
 - [x] Task 2: Dev stack auth callout configuration (done)
-- [ ] Task 3: End-to-end enrollment test and CI (partial)
+- [x] Task 3: End-to-end enrollment test and CI (done)
 
 ## Files Modified
-(none)
+- `crates/rmm-server/src/authd.rs`
+- `crates/rmm-server/src/natsjwt.rs`
+- `scripts/dev-up.sh`
+- `scripts/e2e-enroll.sh`
 
 ## Verification Results
-11/12 verification commands passed (run by Triad after the agent finished).
+12/12 verification commands passed (run by Triad after the agent finished).
 
 ## Verification Commands
 | Command | Exit Code | Result |
 |---------|-----------|--------|
-| `scripts/e2e-enroll.sh` | 1 | FAIL |
+| `scripts/e2e-enroll.sh` | 0 | PASS |
 | `cargo test -p rmm-server --locked` | 0 | PASS |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | 0 | PASS |
 | `scripts/check-layering.sh` | 0 | PASS |
@@ -48,50 +50,30 @@
 | `grep -q e2e-enroll .github/workflows/ci.yml` | 0 | PASS |
 
 ## Key Decisions
-- authd also denies when the stored nkey differs from connect_opts.nkey. A non-WebSocket conn_type is denied in the precheck; an empty conn_type passes the precheck, but the JWT's allowed_connection_types [WEBSOCKET] still blocks it at the server.
+- authd finds a revoked agent's connections by the JWT `name` (`agent:<uuid>`) that authd itself signs, so a client cannot spoof it; the `nkey` field of the revoke notice is ignored.
 
 ## Issues Encountered
-- The 03-04 transport.rs workaround (`with_auth_callback` setting `auth.signature`) never worked: without the async-nats `nkeys` feature the connector discards the signature. authd fails closed here, which is the correct security behaviour.
-- Blocked: The fix is to add "nkeys" to the async-nats features in the root Cargo.toml (`features = ["websockets", "ring", "server_2_11", "nkeys"]`) and update Cargo.lock. Both files are forbidden to this plan. The nkeys crate is already a workspace dependency, so this adds no new crate.
-- BLOCKER: $ scripts/e2e-enroll.sh (exit 1)
+- The disk filled up during builds; I freed space with `docker builder prune -af` (build cache only, it regenerates).
 
 ## Escalations
 | # | Severity | Type | Decision | Status | Resolution |
 |---|----------|------|----------|--------|------------|
-| 1 | blocker | unplanned-dependency-change | Enable the `nkeys` feature on the workspace async-nats dependency in Cargo.toml and refresh Cargo.lock. | approved | User approved enabling the async-nats nkeys feature. Orchestrator added it to the workspace dependency and refreshed Cargo.lock; authd signature verification stays strict. |
-| 2 | blocker | quality | Resolve: $ scripts/e2e-enroll.sh (exit 1) | approved | Cause (missing async-nats nkeys feature) fixed by the approved dependency change; re-run the build to verify scripts/e2e-enroll.sh. |
+| 1 | warning | out-of-scope-file | Make nginx re-resolve upstreams at runtime (docker DNS resolver plus variable proxy_pass) in deploy/nginx/nginx.conf, then drop the reload workaround in scripts/dev-up.sh. | pending | INVALID: type "out-of-scope-file" is not one of architecture, dependency, scope, schema, api, deletion, infrastructure, quality |
+| 2 | info | architecture | Before running a NATS cluster, make the revocation kick gather every CONNZ ping reply (not just the first) so connections on all servers are kicked. | pending |  |
 
-- #1 context: async-nats 0.51 built without `nkeys` drops Auth.signature from CONNECT (connector.rs:698-701), so agents cannot prove possession of their key and authd denies every agent (fail closed). The 03-04 workaround in crates/rmm-agent-core/src/transport.rs depended on that field being sent. This is the only remaining failure in plan 03-05. Do not work around it by loosening authd; signature verification is the core authentication control.
-- #2 context: Verification failed (scripts/e2e-enroll.sh); a BLOCKER is not auto-fixed.
+- #1 context: Rebuilding the image recreates the api container with a new IP. nginx keeps the old one, returns 502, and `up --wait` fails. dev-up.sh now reloads nginx as a workaround; in production the same problem would follow any api redeploy.
+- #2 context: For now it relies on the single-server dev stack. The 1 h JWT expiry plus the deny on reconnect still limit how long a revoked agent stays connected on a server the kick missed.
 
 ## Handoff Context
-- **Key outputs**: (none)
-- **Decisions made**: authd also denies when the stored nkey differs from connect_opts.nkey. A non-WebSocket conn_type is denied in the precheck; an empty conn_type passes the precheck, but the JWT's allowed_connection_types [WEBSOCKET] still blocks it at the server.
+- **Key outputs**: crates/rmm-server/src/authd.rs; crates/rmm-server/src/natsjwt.rs; scripts/dev-up.sh; scripts/e2e-enroll.sh
+- **Decisions made**: authd finds a revoked agent's connections by the JWT `name` (`agent:<uuid>`) that authd itself signs, so a client cannot spoof it; the `nkey` field of the revoke notice is ignored.
 - **Open questions**: (none)
-- **Conventions established**: Once the feature is enabled, re-run scripts/e2e-enroll.sh. The dev stack is up and healthy. The agent code should not need changes.
+- **Conventions established**: Agent NATS user name is `natsjwt::agent_user_name(agent_id)` = `agent:<uuid>`; it appears in NATS logs and connz as the authorized user.
 
 ## Requirements Covered
 - REQ-10
 - REQ-08
 - REQ-09
 
-### Failed verification output
-`scripts/e2e-enroll.sh`
-```
-rmm_agent[0m[2m:[0m connecting [3magent_id[0m[2m=[0m64ae33ee-6f66-471e-b990-e0253afc1248 [3murl[0m[2m=[0mwss://localhost:443/nats
-[2m2026-10-31T18:45:19.962126Z[0m [31mERROR[0m [2masync_nats::connector[0m[2m:[0m signature authentication requires 'nkeys' feature
-[2m2026-10-31T18:45:19.962326Z[0m [32m INFO[0m [2masync_nats[0m[2m:[0m event: client error: nats: failed signing nonce
-[2m2026-10-31T18:45:21.570522Z[0m [31mERROR[0m [2masync_nats::connector[0m[2m:[0m signature authentication requires 'nkeys' feature
-[2m2026-10-31T18:45:21.570773Z[0m [32m INFO[0m [2masync_nats[0m[2m:[0m event: client error: nats: failed signing nonce
-[2m2026-10-31T18:45:25.334261Z[0m [31mERROR[0m [2masync_nats::connector[0m[2m:[0m signature authentication requires 'nkeys' feature
-[2m2026-10-31T18:45:25.334484Z[0m [32m INFO[0m [2masync_nats[0m[2m:[0m event: client error: nats: failed signing nonce
-[2m2026-10-31T18:45:29.582764Z[0m [31mERROR[0m [2masync_nats::connector[0m[2m:[0m signature authentication requires 'nkeys' feature
-[2m2026-10-31T18:45:29.582996Z[0m [32m INFO[0m [2masync_nats[0m[2m:[0m event: client error: nats: failed signing nonce
-[2m2026-10-31T18:45:40.541410Z[0m [31mERROR[0m [2masync_nats::connector[0m[2m:[0m signature authentication requires 'nkeys' feature
-[2m2026-10-31T18:45:40.541673Z[0m [32m INFO[0m [2masync_nats[0m[2m:[0m event: client error: nats: failed signing nonce
-FAIL agent A run --once
-
-```
-
 ## Token Usage
-11 requests, 352143 input tokens (309770 cached), 4924 output tokens, $0.3723
+33 requests, 2406704 input tokens (2309567 cached), 22294 output tokens, $1.3934

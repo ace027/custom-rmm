@@ -241,6 +241,13 @@ pub fn verify_nonce_signature(req: &AuthRequest) -> Result<[u8; 32]> {
     Ok(key)
 }
 
+/// NATS user name of an agent's connection (the user JWT `name`). The
+/// server reports it as the connection's authorized user, so authd finds an
+/// agent's connections in connz by this name.
+pub fn agent_user_name(agent_id: uuid::Uuid) -> String {
+    format!("agent:{agent_id}")
+}
+
 /// Subjects an agent may publish to.
 pub fn agent_pub_allow(agent: &AgentAuthRow) -> Vec<String> {
     let (c, a) = (agent.client_id, agent.agent_id);
@@ -270,7 +277,7 @@ pub fn user_claims(user_nkey: &str, agent: &AgentAuthRow, now: u64) -> Value {
     json!({
         "sub": user_nkey,
         "aud": AGENT_ACCOUNT,
-        "name": format!("agent:{}", agent.agent_id),
+        "name": agent_user_name(agent.agent_id),
         "iat": now,
         "exp": now + USER_JWT_TTL_SECS,
         "nats": {

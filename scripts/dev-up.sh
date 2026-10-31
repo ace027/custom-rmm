@@ -43,4 +43,9 @@ if [[ ! -f $auth/dev-key.pem || ! -f $auth/dev-pub.pem ]]; then
   chmod 644 "$auth/dev-key.pem" "$auth/dev-pub.pem"
   echo "generated dev token issuer key in $auth"
 fi
-exec docker compose -f deploy/compose.yaml up -d --wait
+compose=(docker compose -f deploy/compose.yaml)
+"${compose[@]}" up -d
+# nginx resolves upstream names once at start; reload it so a recreated api
+# container (new image, new IP) does not leave it proxying to a dead address.
+"${compose[@]}" exec -T nginx nginx -s reload >/dev/null 2>&1 || true
+exec "${compose[@]}" up -d --wait

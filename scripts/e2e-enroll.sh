@@ -134,13 +134,17 @@ grep -qi 'permissions violation' <<<"$out" || fail "cross-tenant subscribe not d
 pass "(3) agent A cannot publish to or subscribe on agent B's subjects"
 
 # (4) The agent key is refused over plain TCP.
-out=$(nats_box "$SEED_A" --server nats://127.0.0.1:4222 pub "telemetry.$CA_ID.$AG_A.hb" x || true)
+# No --tlsca here: with a CA the CLI insists on TLS and never reaches auth.
+out=$(docker run --rm --network host -v "$SEED_A:/agent.nk:ro" natsio/nats-box:latest \
+  nats --nkey /agent.nk --timeout 3s --server nats://127.0.0.1:4222 \
+  pub "telemetry.$CA_ID.$AG_A.hb" x 2>&1 || true)
 grep -qi 'authorization violation' <<<"$out" || fail "plain TCP not refused: $out"
 pass "(4) agent key over nats://127.0.0.1:4222 fails authorization"
 
 # (5) Revocation kicks a connected agent within 5 s and blocks reconnects.
 LOG_A=$WORK/agent-a.log
-agent run --state-dir "$DIR_A" >"$LOG_A" 2>&1 &
+# Not via the agent() function: $! must be the agent process itself.
+"${AGENT_CMD[@]}" run --state-dir "$DIR_A" >"$LOG_A" 2>&1 &
 BG_PID=$!
 for _ in $(seq 1 60); do
   grep -q 'nats connected' "$LOG_A" && break

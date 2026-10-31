@@ -7,10 +7,9 @@
 //! WebSocket-only, one hour user JWT. Any failure is a deny with a generic
 //! message. authd also kicks connections of agents the API revokes.
 //!
-//! The callout subscription uses a minimal NATS protocol reader ([`wire`])
-//! because receiving from an `async_nats::Subscriber` needs the
-//! `futures` `Stream` trait, which is not a dependency of this crate. The
-//! SYS connection (connz and kick requests) uses `async_nats`.
+//! Two NATS connections: user `authd` (account RMM) receives callout
+//! requests and revocation notices; user `sys` (account SYS) runs the connz
+//! and kick requests.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -20,12 +19,13 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use axum::{Router, extract::State, http::StatusCode, routing::get};
+use futures_util::StreamExt;
 use nkeys::KeyPair;
 use rmm_db::DbError;
 use rmm_db::repo::{self, AgentAuthRow, Tx};
 use rmm_db::scope::Scope;
 use serde_json::{Value, json};
-use tokio::sync::{Semaphore, mpsc};
+use tokio::sync::Semaphore;
 
 use crate::natsjwt::{self, AuthRequest};
 
@@ -289,12 +289,12 @@ async fn sys_request(sys: &async_nats::Client, subject: String, body: Value) -> 
     serde_json::from_slice(&msg.payload).context("sys response json")
 }
 
-/// Kick every connection authenticated with `nkey`; returns how many.
-async fn kick_once(sys: &async_nats::Client, nkey: &str) -> Result<usize> {
+/// Kick every connection authenticated as `user`; returns how many.
+async fn kick_once(sys: &async_nats::Client, user: &str) -> Result<usize> {
     let resp = sys_request(
         sys,
         "$SYS.REQ.SERVER.PING.CONNZ".into(),
-        json!({"user": nkey, "limit": 1024}),
+        json!({"user": user, "limit": 1024}),
     )
     .await?;
     let Some((server, cids)) = connz_matches(&resp) else {
@@ -314,28 +314,29 @@ async fn kick_once(sys: &async_nats::Client, nkey: &str) -> Result<usize> {
     Ok(cids.len())
 }
 
+/// The agent id of a revocation notice `{agent_id, nkey}`.
+fn revoked_agent(payload: &[u8]) -> Option<uuid::Uuid> {
+    let v: Value = serde_json::from_slice(payload).ok()?;
+    v.get("agent_id")?.as_str()?.parse().ok()
+}
+
 /// Handle a revocation notice: kick now and once more after a second, to
 /// catch a connection that was mid-authorization when the agent was revoked.
+/// Connections are found by the user name authd put in their JWT (connz
+/// reports callout users by name, not by the client's nkey).
 async fn handle_revoked(payload: &[u8], sys: &async_nats::Client) {
-    let Ok(v) = serde_json::from_slice::<Value>(payload) else {
-        tracing::warn!("bad revocation message");
+    let Some(agent_id) = revoked_agent(payload) else {
+        tracing::warn!("revocation message without a valid agent_id");
         return;
     };
-    let nkey = v.get("nkey").and_then(Value::as_str).unwrap_or("");
-    if natsjwt::public_key_bytes(nkey, natsjwt::PREFIX_USER).is_err() {
-        tracing::warn!("revocation message without a valid user nkey");
-        return;
-    }
-    let agent_id = v.get("agent_id").and_then(Value::as_str).unwrap_or("");
+    let user = natsjwt::agent_user_name(agent_id);
     for pass in 0..2 {
         if pass > 0 {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
-        match kick_once(sys, nkey).await {
-            Ok(n) => {
-                tracing::info!(agent_id = %clip(agent_id), kicked = n, "revoked agent connections kicked")
-            }
-            Err(err) => tracing::warn!(%err, agent_id = %clip(agent_id), "kick failed"),
+        match kick_once(sys, &user).await {
+            Ok(n) => tracing::info!(%agent_id, kicked = n, "revoked agent connections kicked"),
+            Err(err) => tracing::warn!(%err, %agent_id, "kick failed"),
         }
     }
 }
@@ -345,107 +346,67 @@ async fn handle_revoked(payload: &[u8], sys: &async_nats::Client) {
 struct Callout {
     issuer: KeyPair,
     db: Arc<OnceLock<Db>>,
-    sys: async_nats::Client,
     permits: Arc<Semaphore>,
 }
 
-const SID_AUTH: u64 = 1;
-const SID_REVOKED: u64 = 2;
-
-/// One callout connection lifetime; returns when it drops.
-async fn callout_session(cfg: &Config, state: &Arc<Callout>, health: &Health) -> Result<()> {
-    let (mut reader, mut writer) = wire::connect(
-        &cfg.nats_url,
-        &cfg.nats_user,
-        &cfg.nats_password,
-        "rmm-authd",
-    )
-    .await?;
-    let mut setup = Vec::new();
-    setup.extend(wire::sub_frame(AUTH_SUBJECT, "authd", SID_AUTH)?);
-    setup.extend(wire::sub_frame(REVOKED_SUBJECT, "authd", SID_REVOKED)?);
-    setup.extend_from_slice(b"PING\r\n");
-    wire::write(&mut writer, &setup).await?;
-
-    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(1024);
-    let mut writer_task = tokio::spawn(async move {
-        while let Some(frame) = rx.recv().await {
-            wire::write(&mut writer, &frame).await?;
-        }
-        anyhow::Ok(())
-    });
-    health.callout_up.store(true, Ordering::Relaxed);
-    tracing::info!("callout subscription active");
-
-    let result = loop {
-        let ev = tokio::select! {
-            ev = reader.next() => ev,
-            r = &mut writer_task => break match r {
-                Ok(Err(e)) => Err(e),
-                _ => Err(anyhow::anyhow!("writer stopped")),
-            },
+/// Answer callout requests until the subscription ends. async-nats
+/// reconnects and resubscribes on its own, so this normally runs forever.
+async fn serve_callout(
+    client: async_nats::Client,
+    mut sub: async_nats::Subscriber,
+    state: Arc<Callout>,
+) {
+    while let Some(msg) = sub.next().await {
+        let Some(reply) = msg.reply.clone() else {
+            continue;
         };
-        let msg = match ev {
-            Ok(wire::Event::Ping) => {
-                if tx.send(b"PONG\r\n".to_vec()).await.is_err() {
-                    break Err(anyhow::anyhow!("writer stopped"));
-                }
-                continue;
-            }
-            Ok(wire::Event::Other) => continue,
-            Ok(wire::Event::Msg(m)) => m,
-            Err(e) => break Err(e),
+        let Ok(permit) = state.permits.clone().try_acquire_owned() else {
+            // The server times the request out and denies the client.
+            tracing::warn!("too many callout requests in flight; dropping one");
+            continue;
         };
-        match msg.sid {
-            SID_AUTH => {
-                let Some(reply) = msg.reply else { continue };
-                let Ok(permit) = state.permits.clone().try_acquire_owned() else {
-                    tracing::warn!("too many callout requests in flight; dropping one");
-                    continue;
-                };
-                let (state, tx) = (state.clone(), tx.clone());
-                tokio::spawn(async move {
-                    let _permit = permit;
-                    let resp = handle_request(&msg.payload, &state.issuer, state.db.get()).await;
-                    if let Some(resp) = resp
-                        && let Ok(frame) = wire::pub_frame(&reply, &resp)
-                    {
-                        let _ = tx.send(frame).await;
-                    }
-                });
+        let (state, client) = (state.clone(), client.clone());
+        tokio::spawn(async move {
+            let _permit = permit;
+            let resp = handle_request(&msg.payload, &state.issuer, state.db.get()).await;
+            if let Some(resp) = resp
+                && let Err(err) = client.publish(reply, resp.into()).await
+            {
+                tracing::warn!(%err, "callout reply failed");
             }
-            SID_REVOKED => {
-                let sys = state.sys.clone();
-                tokio::spawn(async move { handle_revoked(&msg.payload, &sys).await });
-            }
-            _ => {}
-        }
-    };
-    health.callout_up.store(false, Ordering::Relaxed);
-    writer_task.abort();
-    result
-}
-
-async fn callout_task(cfg: Arc<Config>, state: Arc<Callout>, health: Arc<Health>) {
-    let mut backoff = Duration::from_millis(500);
-    loop {
-        let started = std::time::Instant::now();
-        if let Err(err) = callout_session(&cfg, &state, &health).await {
-            tracing::warn!(err = %format!("{err:#}"), "callout connection lost, reconnecting");
-        }
-        if started.elapsed() > Duration::from_secs(30) {
-            backoff = Duration::from_millis(500);
-        }
-        tokio::time::sleep(backoff).await;
-        backoff = (backoff * 2).min(Duration::from_secs(10));
+        });
     }
+    tracing::error!("callout subscription ended");
 }
 
-async fn sys_watch(sys: async_nats::Client, health: Arc<Health>) {
+/// Kick agents named in revocation notices until the subscription ends.
+async fn serve_revoked(mut sub: async_nats::Subscriber, sys: async_nats::Client) {
+    while let Some(msg) = sub.next().await {
+        let sys = sys.clone();
+        tokio::spawn(async move { handle_revoked(&msg.payload, &sys).await });
+    }
+    tracing::error!("revocation subscription ended");
+}
+
+fn is_up(c: &async_nats::Client) -> bool {
+    c.connection_state() == async_nats::connection::State::Connected
+}
+
+/// Mirror both NATS connection states into [`Health`].
+async fn nats_watch(callout: async_nats::Client, sys: async_nats::Client, health: Arc<Health>) {
     loop {
-        let up = sys.connection_state() == async_nats::connection::State::Connected;
-        if health.sys_up.swap(up, Ordering::Relaxed) != up {
-            tracing::info!(connected = up, "sys connection state changed");
+        for (name, client, flag) in [
+            ("callout", &callout, &health.callout_up),
+            ("sys", &sys, &health.sys_up),
+        ] {
+            let up = is_up(client);
+            if flag.swap(up, Ordering::Relaxed) != up {
+                tracing::info!(
+                    connection = name,
+                    connected = up,
+                    "nats connection state changed"
+                );
+            }
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -486,272 +447,46 @@ pub async fn run() -> Result<()> {
     let issuer = issuer_from_seed(&crate::env_required("RMM_AUTHD_ISSUER_SEED")?)?;
     tracing::info!(issuer = %issuer.public_key(), "authd starting");
 
-    let sys = async_nats::ConnectOptions::with_user_and_password(
-        cfg.sys_user.clone(),
-        cfg.sys_password.clone(),
-    )
-    .name("rmm-authd-sys")
-    .retry_on_initial_connect()
-    .connect(cfg.nats_url.as_str())
-    .await
-    .context("sys nats connect")?;
+    let connect = |user: &str, password: &str, name: &str| {
+        async_nats::ConnectOptions::with_user_and_password(user.to_owned(), password.to_owned())
+            .name(name)
+            .no_echo()
+            .retry_on_initial_connect()
+            .connect(cfg.nats_url.as_str())
+    };
+    let callout = connect(&cfg.nats_user, &cfg.nats_password, "rmm-authd")
+        .await
+        .context("callout nats connect")?;
+    let sys = connect(&cfg.sys_user, &cfg.sys_password, "rmm-authd-sys")
+        .await
+        .context("sys nats connect")?;
+    let auth_sub = callout
+        .queue_subscribe(AUTH_SUBJECT, "authd".into())
+        .await
+        .context("subscribe to callout requests")?;
+    let revoked_sub = callout
+        .queue_subscribe(REVOKED_SUBJECT, "authd".into())
+        .await
+        .context("subscribe to revocations")?;
 
     let health = Arc::new(Health::default());
     let db = Arc::new(OnceLock::new());
     let state = Arc::new(Callout {
         issuer,
         db: db.clone(),
-        sys: sys.clone(),
         permits: Arc::new(Semaphore::new(MAX_IN_FLIGHT)),
     });
     let tasks = [
         tokio::spawn(db_task(cfg.database_url.clone(), db, health.clone())),
-        tokio::spawn(callout_task(cfg.clone(), state, health.clone())),
-        tokio::spawn(sys_watch(sys, health.clone())),
+        tokio::spawn(serve_callout(callout.clone(), auth_sub, state)),
+        tokio::spawn(serve_revoked(revoked_sub, sys.clone())),
+        tokio::spawn(nats_watch(callout, sys, health.clone())),
     ];
     let result = crate::serve(&cfg.listen, health_router(health)).await;
     for t in tasks {
         t.abort();
     }
     result
-}
-
-/// Minimal NATS client protocol over plain TCP: CONNECT with user and
-/// password, SUB, PUB and reading MSG/HMSG frames.
-mod wire {
-    use anyhow::{Context, Result, bail};
-    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-    use tokio::net::TcpStream;
-    use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-
-    const MAX_LINE: u64 = 64 * 1024;
-    const MAX_PAYLOAD: usize = 8 * 1024 * 1024;
-
-    /// A delivered message.
-    #[derive(Debug)]
-    pub struct Msg {
-        pub sid: u64,
-        pub reply: Option<String>,
-        pub payload: Vec<u8>,
-    }
-
-    /// Something read from the server.
-    #[derive(Debug)]
-    pub enum Event {
-        Msg(Msg),
-        Ping,
-        Other,
-    }
-
-    /// Read side of a connection.
-    #[derive(Debug)]
-    pub struct Reader(BufReader<OwnedReadHalf>);
-
-    /// `host:port` from `nats://host[:port]`; TLS URLs are refused.
-    pub fn addr(url: &str) -> Result<String> {
-        let rest = url
-            .strip_prefix("nats://")
-            .context("only nats:// URLs are supported for the callout connection")?;
-        let rest = rest.trim_end_matches('/');
-        let hostport = rest.rsplit('@').next().unwrap_or(rest);
-        if hostport.is_empty() || hostport.contains('/') {
-            bail!("bad NATS URL");
-        }
-        Ok(if hostport.contains(':') {
-            hostport.to_owned()
-        } else {
-            format!("{hostport}:4222")
-        })
-    }
-
-    fn token_ok(s: &str) -> bool {
-        !s.is_empty()
-            && !s
-                .bytes()
-                .any(|b| b.is_ascii_whitespace() || b.is_ascii_control())
-    }
-
-    /// `SUB <subject> <queue> <sid>` frame.
-    pub fn sub_frame(subject: &str, queue: &str, sid: u64) -> Result<Vec<u8>> {
-        if !token_ok(subject) || !token_ok(queue) {
-            bail!("invalid subject or queue");
-        }
-        Ok(format!("SUB {subject} {queue} {sid}\r\n").into_bytes())
-    }
-
-    /// `PUB <subject> <len>` frame with payload.
-    pub fn pub_frame(subject: &str, payload: &[u8]) -> Result<Vec<u8>> {
-        if !token_ok(subject) {
-            bail!("invalid subject");
-        }
-        let mut f = format!("PUB {subject} {}\r\n", payload.len()).into_bytes();
-        f.extend_from_slice(payload);
-        f.extend_from_slice(b"\r\n");
-        Ok(f)
-    }
-
-    pub async fn write(w: &mut OwnedWriteHalf, frame: &[u8]) -> Result<()> {
-        w.write_all(frame).await.context("nats write")?;
-        w.flush().await.context("nats flush")
-    }
-
-    impl Reader {
-        async fn line(&mut self) -> Result<String> {
-            let mut buf = Vec::new();
-            let n = (&mut self.0)
-                .take(MAX_LINE)
-                .read_until(b'\n', &mut buf)
-                .await
-                .context("nats read")?;
-            if n == 0 {
-                bail!("nats connection closed");
-            }
-            if buf.last() != Some(&b'\n') {
-                bail!("nats protocol line too long");
-            }
-            let s = String::from_utf8(buf).context("nats line not utf-8")?;
-            Ok(s.trim_end_matches(['\r', '\n']).to_owned())
-        }
-
-        async fn body(&mut self, len: usize) -> Result<Vec<u8>> {
-            if len > MAX_PAYLOAD {
-                bail!("nats payload too large");
-            }
-            let mut buf = vec![0u8; len + 2];
-            self.0.read_exact(&mut buf).await.context("nats read")?;
-            if !buf.ends_with(b"\r\n") {
-                bail!("nats payload not terminated");
-            }
-            buf.truncate(len);
-            Ok(buf)
-        }
-
-        /// Next protocol event.
-        pub async fn next(&mut self) -> Result<Event> {
-            let line = self.line().await?;
-            let mut parts = line.split_ascii_whitespace();
-            let op = parts.next().unwrap_or("").to_ascii_uppercase();
-            let args: Vec<&str> = parts.collect();
-            let num = |s: &str| s.parse::<usize>().context("bad length");
-            match op.as_str() {
-                "MSG" => {
-                    let (sid, reply, len) = match args.as_slice() {
-                        [_, sid, len] => (sid, None, num(len)?),
-                        [_, sid, reply, len] => (sid, Some((*reply).to_owned()), num(len)?),
-                        _ => bail!("bad MSG line"),
-                    };
-                    let payload = self.body(len).await?;
-                    Ok(Event::Msg(Msg {
-                        sid: sid.parse().context("bad sid")?,
-                        reply,
-                        payload,
-                    }))
-                }
-                "HMSG" => {
-                    let (sid, reply, hlen, tlen) = match args.as_slice() {
-                        [_, sid, h, t] => (sid, None, num(h)?, num(t)?),
-                        [_, sid, reply, h, t] => (sid, Some((*reply).to_owned()), num(h)?, num(t)?),
-                        _ => bail!("bad HMSG line"),
-                    };
-                    if hlen > tlen {
-                        bail!("bad HMSG lengths");
-                    }
-                    let mut payload = self.body(tlen).await?;
-                    payload.drain(..hlen);
-                    Ok(Event::Msg(Msg {
-                        sid: sid.parse().context("bad sid")?,
-                        reply,
-                        payload,
-                    }))
-                }
-                "PING" => Ok(Event::Ping),
-                "-ERR" => bail!("nats error: {}", args.join(" ")),
-                _ => Ok(Event::Other),
-            }
-        }
-    }
-
-    /// Connect, authenticate with user and password and wait for the PONG
-    /// that confirms the CONNECT was accepted.
-    pub async fn connect(
-        url: &str,
-        user: &str,
-        password: &str,
-        name: &str,
-    ) -> Result<(Reader, OwnedWriteHalf)> {
-        let addr = addr(url)?;
-        let stream =
-            tokio::time::timeout(std::time::Duration::from_secs(5), TcpStream::connect(&addr))
-                .await
-                .context("nats connect timed out")?
-                .with_context(|| format!("connect {addr}"))?;
-        stream.set_nodelay(true).ok();
-        let (r, mut w) = stream.into_split();
-        let mut reader = Reader(BufReader::new(r));
-        let info = reader.line().await?;
-        let json = info
-            .strip_prefix("INFO ")
-            .context("expected INFO from server")?;
-        let info: serde_json::Value = serde_json::from_str(json).context("bad INFO json")?;
-        if info
-            .get("tls_required")
-            .and_then(serde_json::Value::as_bool)
-            == Some(true)
-        {
-            bail!("server requires TLS, which the callout connection does not support");
-        }
-        let connect = serde_json::json!({
-            "verbose": false,
-            "pedantic": false,
-            "tls_required": false,
-            "user": user,
-            "pass": password,
-            "name": name,
-            "lang": "rust-rmm-authd",
-            "version": env!("CARGO_PKG_VERSION"),
-            "protocol": 1,
-            "headers": true,
-            "echo": false,
-        });
-        write(&mut w, format!("CONNECT {connect}\r\nPING\r\n").as_bytes()).await?;
-        let wait = async {
-            loop {
-                let line = reader.line().await?;
-                match line.split_ascii_whitespace().next().unwrap_or("") {
-                    "PONG" => return anyhow::Ok(()),
-                    "-ERR" => bail!("nats rejected connect: {line}"),
-                    "PING" => write(&mut w, b"PONG\r\n").await?,
-                    _ => {}
-                }
-            }
-        };
-        tokio::time::timeout(std::time::Duration::from_secs(5), wait)
-            .await
-            .context("nats connect handshake timed out")??;
-        Ok((reader, w))
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn url_and_frames() {
-            assert_eq!(addr("nats://nats:4222").ok().as_deref(), Some("nats:4222"));
-            assert_eq!(addr("nats://nats").ok().as_deref(), Some("nats:4222"));
-            assert!(addr("tls://nats:4222").is_err());
-            assert!(pub_frame("a b", b"x").is_err());
-            assert!(pub_frame("a\r\nPUB", b"x").is_err());
-            assert_eq!(
-                pub_frame("r.1", b"hi").ok(),
-                Some(b"PUB r.1 2\r\nhi\r\n".to_vec())
-            );
-            assert_eq!(
-                sub_frame("$SYS.REQ.USER.AUTH", "authd", 1).ok(),
-                Some(b"SUB $SYS.REQ.USER.AUTH authd 1\r\n".to_vec())
-            );
-        }
-    }
 }
 
 #[cfg(test)]
@@ -802,6 +537,16 @@ mod tests {
         assert_eq!(connz_matches(&v), Some(("NABC".to_owned(), vec![4, 9])));
         let none = json!({"server": {"id": "NABC"}, "data": {"connections": null}});
         assert_eq!(connz_matches(&none), Some(("NABC".to_owned(), vec![])));
+    }
+
+    #[test]
+    fn revocation_notice_needs_a_uuid() {
+        let id = uuid::Uuid::from_u128(7);
+        let ok = json!({"agent_id": id.to_string(), "nkey": "U"}).to_string();
+        assert_eq!(revoked_agent(ok.as_bytes()), Some(id));
+        assert_eq!(revoked_agent(br#"{"agent_id":"agent:x > *"}"#), None);
+        assert_eq!(revoked_agent(b"not json"), None);
+        assert_eq!(natsjwt::agent_user_name(id), format!("agent:{id}"));
     }
 
     #[tokio::test]
