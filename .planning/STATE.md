@@ -2,8 +2,8 @@
 
 ## Current Position
 - **Phase**: 1 of 9 (executing)
-- **Status**: Phase 1 executing — Plan 01-02 complete
-- **Last Activity**: Plan 01-02 execution (2026-10-31)
+- **Status**: Phase 1 executing — Plan 01-03 failed
+- **Last Activity**: Plan 01-03 execution (2026-10-31)
 
 ## Progress
 ```
@@ -32,3 +32,4 @@ Run `/triad:build` to execute Phase 1: Workspace, dev environment and CI
 (build started 2026-10-31)
 - Plan 01-01 (Wave 1): Workspace skeleton, layering and Windows cross-build — Complete
 - Plan 01-02 (Wave 2): Docker compose dev environment and server stubs — Complete
+- Plan 01-03 (Wave 3): GitHub Actions CI — PARTIAL: ci.yml, ci-local.sh, docs/ci.md and the README CI section are written. actionlint is clean, and windows-cross and test-linux pass locally. `ci-local.sh lint` fails at `cargo deny check` on an advisory
