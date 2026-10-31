@@ -7,8 +7,26 @@ license.workspace = true
 publish.workspace = true
 version.workspace = true
 
+[features]
+default = ["card"]
+card = ["dep:openpgp-card", "dep:card-backend-pcsc"]
+
 [dependencies]
 rmm-trust = { workspace = true, features = ["sign"] }
+rmm-proto.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+age.workspace = true
+similar.workspace = true
+rpassword.workspace = true
+zeroize = "1"
+hex.workspace = true
+getrandom = "0.2"
+thiserror.workspace = true
+anyhow.workspace = true
+openpgp-card = { workspace = true, optional = true }
+card-backend-pcsc = { workspace = true, optional = true }
 
 [lints]
 workspace = true

@@ -1,12 +1,18 @@
-//! Offline signing CLI (skeleton).
+//! Offline signing CLI. The only tool that produces trust signatures.
 
-fn main() {
-    if std::env::args().nth(1).as_deref() == Some("--version") {
-        println!("rmm-sign {}", env!("CARGO_PKG_VERSION"));
-        return;
+mod card_backend;
+mod cli;
+mod drafts;
+mod file_backend;
+
+use std::process::ExitCode;
+
+fn main() -> ExitCode {
+    match cli::run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("error: {e:#}");
+            ExitCode::from(cli::exit_code(&e))
+        }
     }
-    println!(
-        "rmm-sign: sign marker length={}",
-        rmm_trust::sign::SIGN_MODULE_MARKER.len()
-    );
 }

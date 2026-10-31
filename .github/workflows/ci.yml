@@ -21,6 +21,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Install PC/SC headers (rmm-sign card backend)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpcsclite-dev pkg-config
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
@@ -42,6 +44,8 @@ jobs:
       XWIN_ACCEPT_LICENSE: "1"
     steps:
       - uses: actions/checkout@v4
+      - name: Install PC/SC headers (rmm-sign card backend)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpcsclite-dev pkg-config
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
@@ -59,10 +63,16 @@ jobs:
           -p rmm-proto -p rmm-trust -p rmm-recipe -p rmm-platform -p rmm-agent-core
           -p rmm-agent -p rmm-watchdog -p rmm-session -p rmm-sign
           --all-targets --locked -- -D warnings
-      - name: Build (x86_64 Windows)
+      # rmm-agent is built in its own invocation so that the `sign` feature
+      # enabled by rmm-sign is not unified into it.
+      - name: Build rmm-agent alone (x86_64 Windows)
+        run: cargo xwin build --target x86_64-pc-windows-msvc -p rmm-agent --locked
+      - name: Build other crates (x86_64 Windows)
         run: >-
           cargo xwin build --target x86_64-pc-windows-msvc
-          -p rmm-agent -p rmm-watchdog -p rmm-session -p rmm-sign --locked
+          -p rmm-watchdog -p rmm-session -p rmm-sign --locked
+      - name: Agent contains no signing code
+        run: scripts/check-agent-no-sign.sh
       - name: Check (aarch64 Windows)
         run: >-
           cargo xwin check --target aarch64-pc-windows-msvc
@@ -76,6 +86,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Install PC/SC headers (rmm-sign card backend)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpcsclite-dev pkg-config
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
@@ -106,3 +118,4 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --locked -p rmm-proto -p rmm-trust -p rmm-recipe -p rmm-platform -p rmm-agent-core -p rmm-agent -p rmm-watchdog -p rmm-session
       - run: cargo build --locked -p rmm-agent
+      - run: cargo build --locked -p rmm-sign

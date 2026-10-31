@@ -24,8 +24,11 @@ job_windows_cross() {
     -p rmm-proto -p rmm-trust -p rmm-recipe -p rmm-platform -p rmm-agent-core \
     -p rmm-agent -p rmm-watchdog -p rmm-session -p rmm-sign \
     --all-targets --locked -- -D warnings
+  # rmm-agent is built alone so the `sign` feature of rmm-sign is not unified in.
+  run cargo xwin build --target x86_64-pc-windows-msvc -p rmm-agent --locked
   run cargo xwin build --target x86_64-pc-windows-msvc \
-    -p rmm-agent -p rmm-watchdog -p rmm-session -p rmm-sign --locked
+    -p rmm-watchdog -p rmm-session -p rmm-sign --locked
+  run scripts/check-agent-no-sign.sh
   run cargo xwin check --target aarch64-pc-windows-msvc \
     -p rmm-agent -p rmm-watchdog --locked
   test -f target/x86_64-pc-windows-msvc/debug/rmm-agent.exe
