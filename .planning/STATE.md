@@ -2,8 +2,8 @@
 
 ## Current Position
 - **Phase**: 3 of 9 (executed, pending review)
-- **Status**: Phase 3 under review — cycle 1/3, 0 blocker(s) remaining
-- **Last Activity**: Phase 3 review cycle 1 (2026-10-31)
+- **Status**: Phase 3 review escalated — 2 unresolved finding(s) (0 blocker/critical) after 3 cycles
+- **Last Activity**: Phase 3 review (2026-10-31)
 
 ## Progress
 ```
@@ -27,7 +27,7 @@
 - Open a pull request for the working branch through the GitHub MCP tools so CI runs on every push (replaces the earlier "no PR" default; gh CLI is not available)
 
 ## Next Action
-Run `/triad:review` to verify Phase 3: Enrollment and NATS auth callout
+Fix the unresolved findings in 03-REVIEW.md, accept the phase as is, or re-plan; then run `/triad:review --phase 3`
 
 ## Phase 1 Results
 (build started 2026-10-31)
