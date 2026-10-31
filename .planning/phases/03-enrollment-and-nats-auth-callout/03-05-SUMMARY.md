@@ -58,8 +58,8 @@
 ## Escalations
 | # | Severity | Type | Decision | Status | Resolution |
 |---|----------|------|----------|--------|------------|
-| 1 | blocker | unplanned-dependency-change | Enable the `nkeys` feature on the workspace async-nats dependency in Cargo.toml and refresh Cargo.lock. | pending | INVALID: type "unplanned-dependency-change" is not one of architecture, dependency, scope, schema, api, deletion, infrastructure, quality |
-| 2 | blocker | quality | Resolve: $ scripts/e2e-enroll.sh (exit 1) | pending |  |
+| 1 | blocker | unplanned-dependency-change | Enable the `nkeys` feature on the workspace async-nats dependency in Cargo.toml and refresh Cargo.lock. | approved | User approved enabling the async-nats nkeys feature. Orchestrator added it to the workspace dependency and refreshed Cargo.lock; authd signature verification stays strict. |
+| 2 | blocker | quality | Resolve: $ scripts/e2e-enroll.sh (exit 1) | approved | Cause (missing async-nats nkeys feature) fixed by the approved dependency change; re-run the build to verify scripts/e2e-enroll.sh. |
 
 - #1 context: async-nats 0.51 built without `nkeys` drops Auth.signature from CONNECT (connector.rs:698-701), so agents cannot prove possession of their key and authd denies every agent (fail closed). The 03-04 workaround in crates/rmm-agent-core/src/transport.rs depended on that field being sent. This is the only remaining failure in plan 03-05. Do not work around it by loosening authd; signature verification is the core authentication control.
 - #2 context: Verification failed (scripts/e2e-enroll.sh); a BLOCKER is not auto-fixed.
