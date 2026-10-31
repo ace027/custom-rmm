@@ -37,13 +37,18 @@ job_windows_cross() {
 job_test_linux() {
   export RMM_HTTPS_PORT=${RMM_HTTPS_PORT:-8443}
   trap 'docker compose -f deploy/compose.yaml down -v' EXIT
-  run cargo test --workspace --locked
-  if ! run scripts/smoke-dev.sh || ! run scripts/e2e-enroll.sh; then
+  local pw
+  pw=$(sed -n 's/^RMM_PG_PASSWORD=//p' deploy/.env.example)
+  # Database-backed tests (#[sqlx::test]) need the stack, so start it first.
+  if ! run scripts/smoke-dev.sh; then
     docker compose -f deploy/compose.yaml logs --no-color || true
     exit 1
   fi
-  local pw
-  pw=$(sed -n 's/^RMM_PG_PASSWORD=//p' deploy/.env.example)
+  DATABASE_URL="postgres://rmm:${pw}@localhost:5432/rmm" run cargo test --workspace --locked
+  if ! run scripts/e2e-enroll.sh; then
+    docker compose -f deploy/compose.yaml logs --no-color || true
+    exit 1
+  fi
   DATABASE_URL="postgres://rmm:${pw}@localhost:5432/rmm" SQLX_OFFLINE=false \
     run cargo sqlx prepare --workspace --check
 }

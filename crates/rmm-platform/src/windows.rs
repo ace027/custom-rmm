@@ -1,14 +1,19 @@
 use crate::keystore::KEY_FILE;
 use crate::smbios::parse_rsmb;
 use crate::{HwFacts, KeyStore, Platform, PlatformError};
-use ::windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, ERROR_MORE_DATA, HLOCAL, LocalFree};
+use ::windows::Win32::Foundation::{
+    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_MORE_DATA, HANDLE, HLOCAL, LocalFree,
+};
 use ::windows::Win32::Security::Authorization::{
-    ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
 use ::windows::Win32::Security::Cryptography::{
     CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptProtectData, CryptUnprotectData,
 };
-use ::windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
+use ::windows::Win32::Security::{
+    GetTokenInformation, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
+    TokenUser,
+};
 use ::windows::Win32::Storage::FileSystem::{
     CreateDirectoryW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
 };
@@ -16,6 +21,7 @@ use ::windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegG
 use ::windows::Win32::System::SystemInformation::{
     ComputerNameDnsHostname, FIRMWARE_TABLE_PROVIDER, GetComputerNameExW, GetSystemFirmwareTable,
 };
+use ::windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use ::windows::core::{PCWSTR, PWSTR, w};
 use std::ffi::c_void;
 use std::fs;
@@ -26,8 +32,8 @@ use zeroize::Zeroizing;
 
 /// `'RSMB'`: the raw SMBIOS firmware table provider.
 const RSMB: FIRMWARE_TABLE_PROVIDER = FIRMWARE_TABLE_PROVIDER(0x5253_4D42);
-/// SYSTEM gets full control; the DACL is protected so nothing is inherited.
-const KEY_DIR_SDDL: PCWSTR = w!("D:P(A;OICI;FA;;;SY)");
+/// SID string of LocalSystem.
+const SYSTEM_SID: &str = "S-1-5-18";
 
 fn wide(p: &Path) -> Vec<u16> {
     p.as_os_str().encode_wide().chain(Some(0)).collect()
@@ -95,18 +101,79 @@ impl Drop for LocalBuf {
     }
 }
 
-/// Create `dir` (and missing parents) with a protected SYSTEM-only DACL on the
-/// leaf. An existing directory is left untouched.
+/// Closes a kernel handle on drop.
+struct OwnedHandle(HANDLE);
+
+impl Drop for OwnedHandle {
+    fn drop(&mut self) {
+        // SAFETY: the handle was opened by this module and is closed once, here.
+        let _ = unsafe { CloseHandle(self.0) };
+    }
+}
+
+/// SID string of the user the current process runs as.
+fn current_user_sid() -> Result<String, PlatformError> {
+    let mut token = HANDLE::default();
+    // SAFETY: GetCurrentProcess returns a pseudo-handle that needs no closing;
+    // `token` is a valid out pointer and is closed by `OwnedHandle`.
+    unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }
+        .map_err(|e| os_err("open process token", e))?;
+    let token = OwnedHandle(token);
+    let mut len = 0u32;
+    // SAFETY: a null buffer asks for the required size in `len`; the call
+    // fails with ERROR_INSUFFICIENT_BUFFER, which is expected here.
+    let _ = unsafe { GetTokenInformation(token.0, TokenUser, None, 0, &mut len) };
+    // u64 elements keep the buffer aligned for TOKEN_USER (it holds a pointer).
+    let mut buf = vec![0u64; (len as usize).div_ceil(8)];
+    // SAFETY: `buf` provides at least `len` writable bytes.
+    unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenUser,
+            Some(buf.as_mut_ptr().cast::<c_void>()),
+            len,
+            &mut len,
+        )
+    }
+    .map_err(|e| os_err("query token user", e))?;
+    // SAFETY: the call succeeded, so `buf` starts with an aligned TOKEN_USER
+    // whose SID points into `buf`, which outlives this borrow.
+    let user = unsafe { &*buf.as_ptr().cast::<TOKEN_USER>() };
+    let mut sid = PWSTR::null();
+    // SAFETY: `user.User.Sid` is a valid SID and `sid` a valid out pointer;
+    // the string is freed by `LocalBuf`.
+    unsafe { ConvertSidToStringSidW(user.User.Sid, &mut sid) }
+        .map_err(|e| os_err("format token SID", e))?;
+    let _guard = LocalBuf(sid.0.cast::<c_void>());
+    // SAFETY: on success `sid` is a NUL-terminated UTF-16 string.
+    unsafe { sid.to_string() }.map_err(|e| os_err("decode token SID", e))
+}
+
+/// Protected DACL for the key directory: full control for SYSTEM and for the
+/// user running the agent, nothing inherited. In production the agent runs as
+/// SYSTEM, so only SYSTEM is granted.
+fn key_dir_sddl() -> Result<Vec<u16>, PlatformError> {
+    let user = current_user_sid()?;
+    let mut sddl = String::from("D:P(A;OICI;FA;;;SY)");
+    if user != SYSTEM_SID {
+        sddl.push_str(&format!("(A;OICI;FA;;;{user})"));
+    }
+    Ok(sddl.encode_utf16().chain(Some(0)).collect())
+}
+
+/// Create `dir` (and missing parents) with the protected key-directory DACL on
+/// the leaf. An existing directory is left untouched.
 fn create_protected_dir(dir: &Path) -> Result<(), PlatformError> {
     if let Some(parent) = dir.parent() {
         fs::create_dir_all(parent).map_err(|e| os_err("create parent dir", e))?;
     }
+    let sddl = key_dir_sddl()?;
     let mut sd = PSECURITY_DESCRIPTOR::default();
-    // SAFETY: the SDDL is a NUL-terminated literal and `sd` is a valid out
-    // pointer; the allocated descriptor is released by `LocalBuf` below.
+    // SAFETY: `sddl` is NUL-terminated and outlives the call, and `sd` is a
+    // valid out pointer; the allocated descriptor is released by `LocalBuf`.
     unsafe {
         ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            KEY_DIR_SDDL,
+            PCWSTR(sddl.as_ptr()),
             SDDL_REVISION_1,
             &mut sd,
             None,

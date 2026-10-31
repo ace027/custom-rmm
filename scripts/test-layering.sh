@@ -25,7 +25,9 @@ echo "PASS: server->platform violation detected"
 
 # (b) agent-side crate enables rmm-trust sign
 fresh_copy "$work/b"
-sed -i 's|^rmm-trust = .*|rmm-trust = { workspace = true, features = ["sign"] }|' "$work/b/crates/rmm-agent-core/Cargo.toml"
+sed -E -i 's#^rmm-trust(\.workspace)? = .*#rmm-trust = { workspace = true, features = ["sign"] }#' "$work/b/crates/rmm-agent-core/Cargo.toml"
+grep -q 'features = \["sign"\]' "$work/b/crates/rmm-agent-core/Cargo.toml" \
+  || { echo "FAIL: could not inject the sign feature into rmm-agent-core"; exit 1; }
 if run_check "$work/b"; then echo "FAIL: agent sign violation not detected"; exit 1; fi
 saw_fail "$work/b" || { echo "FAIL: no rule FAIL line for (b)"; exit 1; }
 echo "PASS: agent sign violation detected"
