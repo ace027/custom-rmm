@@ -275,10 +275,10 @@ xtask/            msi, release-manifest draft, test vectors, openapi export
 3. **The server can withhold revocation updates.** Mitigation: expiry plus fail-closed; an optional out-of-band mirror (open question).
 4. **Timescale compression breaks RLS:** private schema plus scoped views.
 5. **RLS depends on a scope the app sets itself:** state in the threat model that it is defense in depth.
-6. **The build-phases embed is unrendered:** phase 1 is defined here; the six phases are needed for the roadmap.
+6. **The build-phases embed is unrendered:** resolved with an inferred six-phase roadmap (see Open Questions).
 7. **Console login is unspecified:** resolved: Entra ID OIDC + PKCE with MFA through Conditional Access, plus WebAuthn for shells.
 8. **VM clones with duplicate SMBIOS:** the fingerprint rules above now; TPM keys later.
-9. **Encrypted SQLite:** app-level AEAD instead of SQLCipher (metadata stays readable).
+9. **Encrypted SQLite:** resolved: app-level AEAD instead of SQLCipher (metadata stays readable).
 10. **Command TTL vs offline delivery:** 10 min default, `max_queue_ttl` per definition.
 11. **The "IT is connected" indicator needs the session helper:** a minimal helper in M6.
 12. **OpenPGP card EdDSA input size and `openpgp-card` maturity:** week-1 spike, with PIV Ed25519 (fw 5.7+) as the fallback.
@@ -297,11 +297,21 @@ Resolved in discussion (2026-10-31):
 - **Session recordings:** retained 1 year, then purged by a scheduled job; access is audited.
 - **Shell authenticators:** hardware only. `rmm-sign techlist` enforces an AAGUID allowlist (YubiKey 5 series) and rejects synced passkeys.
 
+- **Local store encryption:** app-level AEAD (XChaCha20-Poly1305 per value, key wrapped by DPAPI); no SQLCipher.
+- **Root key custody:** generated on an air-gapped laptop, age-encrypted with a passphrase, two USB copies (safe + offsite); ceremony runbook lives in the repo.
+- **Roadmap (inferred; the spec embed did not render):**
+  1. Foundation: this design.
+  2. Policy engine (compile/sign/push), conditions, alerts; AI gateway in shadow mode.
+  3. Catalog slice 1–7, autonomy gate L0–L3, approval cards, trust scores, kill switches.
+  4. MCP server (read, then propose); AI diagnosis loop; privacy tiers.
+  5. File transfer, remote desktop (WebRTC/coturn), Linux agent.
+  6. Patching (WUA), macOS agent, Authenticode + AV CI stage.
+  - **Gate:** parallel-run criteria met → first client endpoint.
+
 | Question | Resolution path |
 | --- | --- |
-| Paste the six build phases from the spec's embed | User provides; feeds ROADMAP.md at `/triad:start` |
-| App-level AEAD instead of SQLCipher? | Default yes; revisit if a compliance requirement demands full-file encryption |
-| Where the root key lives and who attends ceremonies | Owner decision before M1 dry run |
+| Gate criteria for the first client endpoint (spec open question) | Define during phase 2–3 retros from shadow-mode data |
+| Who attends root ceremonies (witness?) | Owner decision before the M1 dry run |
 | E2E-encrypted shell after phase 1? | Confirmed deferred; field reserved |
 | ConPTY under LocalSystem in session 0 | Spike in M0/M1 via `test-windows` |
 | OpenPGP card EdDSA digest signing via `openpgp-card` | Week-1 spike; fallback PIV Ed25519 |
@@ -319,5 +329,7 @@ Greenfield Rust Cargo workspace (`ace027/custom-rmm`) for a security-first RMM b
 - **Data:** Postgres + TimescaleDB with RLS on `tenant.*`, and metrics in a private compressed hypertable behind scoped views.
 - **Dev and CI:** docker compose (Timescale, NATS, Nginx TLS); CI with lint, cargo-xwin Windows cross-compile, Linux tests and native Windows tests.
 - **Phase 1:** M0 skeleton → M1 trust core + `rmm-sign` → M2 enrollment + NATS auth → M3 heartbeat/inventory/metrics → M4 encrypted local store/offline → M5 signed commands + print-spooler action → M6 co-signed remote shell → M7 watchdog + A/B updater → M8 MSI.
+- **Local store and root key:** app-level AEAD local store; root key age-encrypted on two USB sticks (safe + offsite).
+- **Roadmap:** 1 Foundation → 2 Policy + alerts + AI shadow → 3 Catalog + autonomy gate + approvals → 4 MCP + diagnosis → 5 File transfer + remote desktop + Linux → 6 Patching + macOS + Authenticode/AV → gate: first client.
 - **Non-goals for phase 1:** AI, MCP, policy engine, remote desktop, Linux/macOS agents, Authenticode, n8n.
 - **Constraints:** no AI on endpoints; no obfuscation or EncodedCommand; outbound-only agent; `client_id` on every tenant table.
