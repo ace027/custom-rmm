@@ -97,6 +97,10 @@ jobs:
         env:
           RMM_HTTPS_PORT: "8443"
         run: scripts/smoke-dev.sh
+      - name: End-to-end enrollment (agent, authd callout, revocation, reattach)
+        env:
+          RMM_HTTPS_PORT: "8443"
+        run: scripts/e2e-enroll.sh
       - name: sqlx offline data is current
         env:
           SQLX_OFFLINE: "false"

@@ -43,6 +43,8 @@ services:
       RMM_NATS_INGEST_PASSWORD: ${RMM_NATS_INGEST_PASSWORD:?set in deploy/.env}
       RMM_NATS_AUTHD_PASSWORD: ${RMM_NATS_AUTHD_PASSWORD:?set in deploy/.env}
       RMM_NATS_SYS_PASSWORD: ${RMM_NATS_SYS_PASSWORD:?set in deploy/.env}
+      # Auth callout issuer; scripts/dev-up.sh generates it into deploy/.env.
+      RMM_AUTHD_ISSUER_PUBKEY: ${RMM_AUTHD_ISSUER_PUBKEY:-}
     volumes:
       - ./nats/nats.conf:/etc/nats/nats.conf:ro
       - natsdata:/data
@@ -80,6 +82,20 @@ services:
     environment:
       RMM_API_LISTEN: 0.0.0.0:8080
       RMM_DATABASE_URL: ${RMM_DATABASE_URL:?set in deploy/.env}
+      RMM_NATS_URL: ${RMM_NATS_URL:?set in deploy/.env}
+      RMM_NATS_USER: api
+      RMM_NATS_PASSWORD: ${RMM_NATS_API_PASSWORD:?set in deploy/.env}
+      RMM_NATS_PUBLIC_URL: wss://localhost:${RMM_HTTPS_PORT:-443}/nats
+      RMM_ROOT_PUBKEYS: ${RMM_ROOT_PUBKEYS:-}
+      RMM_ROOT_THRESHOLD: ${RMM_ROOT_THRESHOLD:-1}
+      RMM_ENTRA_TENANT_ID: ${RMM_ENTRA_TENANT_ID:-}
+      RMM_ENTRA_AUDIENCE: api://rmm-dev
+      # Dev issuer for `rmm-server dev-token`; never enable outside dev.
+      RMM_AUTH_ALLOW_DEV: "1"
+      RMM_AUTH_DEV_PUBKEY_FILE: /run/rmm-auth/dev-pub.pem
+      RMM_AUTH_DEV_KEY_FILE: /run/rmm-auth/dev-key.pem
+    volumes:
+      - ./dev/auth:/run/rmm-auth:ro
     healthcheck:
       test: ["CMD", "/usr/local/bin/rmm-server", "healthcheck", "http://127.0.0.1:8080/healthz"]
       interval: 5s
@@ -108,6 +124,10 @@ services:
       RMM_NATS_URL: ${RMM_NATS_URL:?set in deploy/.env}
       RMM_NATS_USER: authd
       RMM_NATS_PASSWORD: ${RMM_NATS_AUTHD_PASSWORD:?set in deploy/.env}
+      RMM_NATS_SYS_USER: sys
+      RMM_NATS_SYS_PASSWORD: ${RMM_NATS_SYS_PASSWORD:?set in deploy/.env}
+      RMM_AUTHD_ISSUER_SEED: ${RMM_AUTHD_ISSUER_SEED:-}
+      RMM_DATABASE_URL: ${RMM_DATABASE_URL:?set in deploy/.env}
     healthcheck:
       test: ["CMD", "/usr/local/bin/rmm-server", "healthcheck", "http://127.0.0.1:8082/healthz"]
       interval: 5s

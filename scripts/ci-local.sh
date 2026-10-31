@@ -38,7 +38,7 @@ job_test_linux() {
   export RMM_HTTPS_PORT=${RMM_HTTPS_PORT:-8443}
   trap 'docker compose -f deploy/compose.yaml down -v' EXIT
   run cargo test --workspace --locked
-  if ! run scripts/smoke-dev.sh; then
+  if ! run scripts/smoke-dev.sh || ! run scripts/e2e-enroll.sh; then
     docker compose -f deploy/compose.yaml logs --no-color || true
     exit 1
   fi

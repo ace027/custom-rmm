@@ -13,7 +13,9 @@ use tokio::net::TcpStream;
 use utoipa::OpenApi;
 
 mod api;
+mod authd;
 mod dev_token;
+mod natsjwt;
 
 /// RMM server.
 #[derive(Debug, Parser)]
@@ -47,11 +49,36 @@ enum Command {
         #[arg(long, default_value_t = 3600)]
         ttl: u64,
     },
+    /// Print a new NATS nkey pair as `seed=` and `public=` lines.
+    GenNkey {
+        /// Key type.
+        #[arg(long = "type", value_enum)]
+        kind: NkeyKind,
+    },
     /// Probe an http:// URL and exit non-zero unless it answers 2xx.
     Healthcheck {
         /// URL to probe, e.g. http://127.0.0.1:8080/healthz
         url: String,
     },
+}
+
+/// nkey types `gen-nkey` can create.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum NkeyKind {
+    /// Account key (auth callout issuer).
+    Account,
+    /// User key.
+    User,
+}
+
+/// `seed=...` and `public=...` lines for a fresh key pair.
+fn gen_nkey(kind: NkeyKind) -> Result<String> {
+    let kp = match kind {
+        NkeyKind::Account => nkeys::KeyPair::new_account(),
+        NkeyKind::User => nkeys::KeyPair::new_user(),
+    };
+    let seed = kp.seed().map_err(|e| anyhow::anyhow!("nkey seed: {e}"))?;
+    Ok(format!("seed={seed}\npublic={}", kp.public_key()))
 }
 
 /// Plain HTTP/1.1 GET with a 3 second budget; `Ok` only for a 2xx status.
@@ -241,7 +268,8 @@ async fn main() -> Result<()> {
             serve(&env_or("RMM_API_LISTEN", "0.0.0.0:8080"), app).await?;
         }
         Command::Ingest => run_nats_service("rmm-ingest", "0.0.0.0:8081").await?,
-        Command::Authd => run_nats_service("rmm-authd", "0.0.0.0:8082").await?,
+        Command::Authd => authd::run().await?,
+        Command::GenNkey { kind } => println!("{}", gen_nkey(kind)?),
         Command::Migrate => run_migrate().await?,
     }
     Ok(())
@@ -277,6 +305,15 @@ mod tests {
                 ttl: 60
             }
         );
+        let cli =
+            Cli::try_parse_from(["rmm-server", "gen-nkey", "--type", "account"]).expect("gen");
+        assert_eq!(
+            cli.command,
+            Command::GenNkey {
+                kind: NkeyKind::Account
+            }
+        );
+        assert!(Cli::try_parse_from(["rmm-server", "gen-nkey", "--type", "server"]).is_err());
         let cli = Cli::try_parse_from(["rmm-server", "healthcheck", "http://x/y"]).expect("hc");
         assert_eq!(
             cli.command,
@@ -284,6 +321,28 @@ mod tests {
                 url: "http://x/y".to_string()
             }
         );
+    }
+
+    #[test]
+    fn gen_nkey_prints_seed_and_public() {
+        for (kind, seed_prefix, pub_prefix) in
+            [(NkeyKind::Account, "SA", 'A'), (NkeyKind::User, "SU", 'U')]
+        {
+            let out = gen_nkey(kind).expect("gen");
+            let mut lines = out.lines();
+            let seed = lines
+                .next()
+                .and_then(|l| l.strip_prefix("seed="))
+                .expect("seed");
+            let public = lines
+                .next()
+                .and_then(|l| l.strip_prefix("public="))
+                .expect("public");
+            assert!(seed.starts_with(seed_prefix));
+            assert!(public.starts_with(pub_prefix));
+            let kp = nkeys::KeyPair::from_seed(seed).expect("parse seed");
+            assert_eq!(kp.public_key(), public);
+        }
     }
 
     async fn status_of(connected: bool) -> StatusCode {
