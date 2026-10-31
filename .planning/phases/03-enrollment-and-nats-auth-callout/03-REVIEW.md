@@ -49,3 +49,7 @@
 
 ## Coverage
 No coverage data found (looked for coverage/coverage-summary.json, coverage-summary.json, coverage/lcov.info, lcov.info, coverage.xml, coverage/cobertura-coverage.xml, coverage/coverage.xml, coverage.txt, coverage/coverage.txt). Advisory only: run the test suite with coverage to check review.coverage_thresholds.
+
+## Security Review
+
+**Verdict**: CAUTION — 0 unresolved CRITICAL/HIGH finding(s). Details: `SECURITY-REVIEW.md`.
