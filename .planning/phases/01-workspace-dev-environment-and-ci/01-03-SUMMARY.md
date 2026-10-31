@@ -62,8 +62,8 @@
 ## Escalations
 | # | Severity | Type | Decision | Status | Resolution |
 |---|----------|------|----------|--------|------------|
-| 1 | blocker | dependency | Resolve RUSTSEC-2026-0382 (rustls-webpki 0.102.8 via async-nats 0.42.0). Choose between upgrading async-nats or adding a justified ignore to deny.toml. | pending |  |
-| 2 | blocker | quality | Resolve: $ scripts/ci-local.sh lint (exit 1) | pending |  |
+| 1 | blocker | dependency | Resolve RUSTSEC-2026-0382 (rustls-webpki 0.102.8 via async-nats 0.42.0). Choose between upgrading async-nats or adding a justified ignore to deny.toml. | approved | User chose to upgrade async-nats to 0.51 (no ignores) so rustls-webpki moves to a patched version; orchestrator applies the workspace dependency change, then 01-03 is rebuilt. |
+| 2 | blocker | quality | Resolve: $ scripts/ci-local.sh lint (exit 1) | approved | ci-local.sh lint failure was caused by the async-nats advisory; resolved by the approved async-nats upgrade, re-verified by rebuilding 01-03. |
 
 - #1 context: Both options touch files outside plan 01-03 (Cargo.toml, Cargo.lock, deny.toml). `cargo deny check` is a lint gate, so the lint job and `ci-local.sh lint` fail until this is decided.
 - #2 context: Verification failed (scripts/ci-local.sh lint); a BLOCKER is not auto-fixed.
