@@ -1,4 +1,9 @@
-//! Platform-agnostic agent core (skeleton).
+//! Platform-agnostic agent core: enrollment, persistent identity and the NATS
+//! transport.
+
+pub mod enroll;
+pub mod identity;
+pub mod transport;
 
 use rmm_platform::Platform;
 
