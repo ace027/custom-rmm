@@ -607,9 +607,11 @@ async fn revoke_sets_status_audits_and_requires_admin(pool: PgPool) {
         call(&ctx.app, revoke(Uuid::new_v4(), admin())).await.0,
         StatusCode::NOT_FOUND
     );
+    // The test state has no NATS client, so the kick cannot be published:
+    // the revoke is committed but reported as a retryable 503, not a 204.
     assert_eq!(
         call(&ctx.app, revoke(a.agent_id, admin())).await.0,
-        StatusCode::NO_CONTENT
+        StatusCode::SERVICE_UNAVAILABLE
     );
     let status: String = sqlx::query("select status from tenant.agent where id = $1")
         .bind(a.agent_id)
@@ -619,6 +621,122 @@ async fn revoke_sets_status_audits_and_requires_admin(pool: PgPool) {
         .get(0);
     assert_eq!(status, "revoked");
     assert_eq!(audit_count(&ctx.pool, "agent.revoke").await, 1);
+    // Repeating is allowed and still reports the unpublished kick.
+    assert_eq!(
+        call(&ctx.app, revoke(a.agent_id, admin())).await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+}
+
+async fn agent_status(pool: &PgPool, id: Uuid) -> String {
+    sqlx::query("select status from tenant.agent where id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+        .get(0)
+}
+
+async fn device_status(pool: &PgPool, id: Uuid) -> String {
+    sqlx::query("select status from tenant.device where id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+        .get(0)
+}
+
+fn device_action(id: Uuid, action: &str, auth: String) -> Request<Body> {
+    Request::post(format!("/api/v1/devices/{id}/{action}"))
+        .header("authorization", auth)
+        .body(Body::empty())
+        .unwrap()
+}
+
+/// A clone held for review next to its still-live original.
+async fn held_clone(ctx: &Ctx) -> (EnrollResponse, EnrollResponse) {
+    let tok = make_token(ctx, ctx.client, ctx.site, 5, true).await;
+    let first = enroll_ok(ctx, &signed_request(&tok, 1, strong_hw("SN-1"), now())).await;
+    sqlx::query("update tenant.agent set last_seen = now() - interval '1 hour' where id = $1")
+        .bind(first.agent_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let second = enroll_ok(ctx, &signed_request(&tok, 2, strong_hw("SN-1"), now())).await;
+    assert_eq!(second.status, "pending_review");
+    assert_eq!(
+        agent_status(&ctx.pool, second.agent_id).await,
+        "suspect_clone"
+    );
+    (first, second)
+}
+
+#[sqlx::test(migrations = "../rmm-db/migrations")]
+async fn approve_activates_clone_and_supersedes_original(pool: PgPool) {
+    let ctx = setup(pool).await;
+    let (first, second) = held_clone(&ctx).await;
+    assert_eq!(
+        call(
+            &ctx.app,
+            device_action(second.device_id, "approve", bearer(&[]))
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    // The superseded original needs a kick; without NATS that is a 503, but
+    // the transition is committed.
+    assert_eq!(
+        call(
+            &ctx.app,
+            device_action(second.device_id, "approve", admin())
+        )
+        .await
+        .0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert_eq!(device_status(&ctx.pool, second.device_id).await, "active");
+    assert_eq!(agent_status(&ctx.pool, second.agent_id).await, "active");
+    assert_eq!(agent_status(&ctx.pool, first.agent_id).await, "superseded");
+    assert_eq!(audit_count(&ctx.pool, "device.approve").await, 1);
+    // No longer held: a second approval finds nothing.
+    assert_eq!(
+        call(
+            &ctx.app,
+            device_action(second.device_id, "approve", admin())
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+    // An active device cannot be rejected either.
+    assert_eq!(
+        call(&ctx.app, device_action(first.device_id, "reject", admin()))
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[sqlx::test(migrations = "../rmm-db/migrations")]
+async fn reject_revokes_the_held_agent_and_keeps_the_original(pool: PgPool) {
+    let ctx = setup(pool).await;
+    let (first, second) = held_clone(&ctx).await;
+    assert_eq!(
+        call(&ctx.app, device_action(second.device_id, "reject", admin()))
+            .await
+            .0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert_eq!(agent_status(&ctx.pool, second.agent_id).await, "revoked");
+    assert_eq!(agent_status(&ctx.pool, first.agent_id).await, "active");
+    assert_eq!(audit_count(&ctx.pool, "device.reject").await, 1);
+    assert_eq!(
+        call(&ctx.app, device_action(Uuid::new_v4(), "reject", admin()))
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
 }
 
 fn manifest_envelope(seq: u64, signer: &SigningKey) -> Vec<u8> {

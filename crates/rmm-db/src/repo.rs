@@ -1,8 +1,9 @@
 //! Repositories. Every function takes a scoped transaction, never the pool.
 
+use sqlx::postgres::PgRow;
 use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::types::{JsonValue, Uuid};
-use sqlx::{Postgres, Transaction};
+use sqlx::{Postgres, Row, Transaction};
 
 use crate::DbError;
 
@@ -290,6 +291,143 @@ pub async fn set_agent_status(
     Ok(row)
 }
 
+// The queries below are runtime-checked (`sqlx::query`) so they need no entry
+// in the offline `.sqlx` cache.
+
+const AGENT_RETURNING: &str = "returning id, client_id, device_id, status, nkey";
+
+fn agent_row(r: &PgRow) -> Result<AgentRow> {
+    Ok(AgentRow {
+        id: r.try_get("id")?,
+        client_id: r.try_get("client_id")?,
+        device_id: r.try_get("device_id")?,
+        status: r.try_get("status")?,
+        nkey: r.try_get("nkey")?,
+    })
+}
+
+/// Move an agent to `to`, only if its current status is one of `from`.
+/// `None` if the agent does not exist, is out of scope or is in another state.
+pub async fn transition_agent_status(
+    tx: &mut Tx<'_>,
+    agent_id: Uuid,
+    from: &[&str],
+    to: &str,
+) -> Result<Option<AgentRow>> {
+    let from: Vec<String> = from.iter().map(|s| (*s).to_owned()).collect();
+    let row = sqlx::query(&format!(
+        "update tenant.agent set status = $3 where id = $1 and status = any($2) {AGENT_RETURNING}"
+    ))
+    .bind(agent_id)
+    .bind(from)
+    .bind(to)
+    .fetch_optional(&mut **tx)
+    .await?;
+    row.as_ref().map(agent_row).transpose()
+}
+
+/// Result of approving a held device.
+#[derive(Debug, Clone)]
+pub struct Approval {
+    /// Owning client.
+    pub client_id: Uuid,
+    /// Agents of the device that became `active`.
+    pub activated: Vec<AgentRow>,
+    /// Agents of the original device that became `superseded`.
+    pub superseded: Vec<AgentRow>,
+}
+
+/// Approve a `pending_review` or `flagged` device: the device and its
+/// `suspect_clone` agents become `active`, and the live agents of the device
+/// it may be a clone of (same client only) become `superseded`. `None` if the
+/// device is unknown, out of scope or not held.
+pub async fn approve_device(tx: &mut Tx<'_>, device_id: Uuid) -> Result<Option<Approval>> {
+    let Some(dev) = sqlx::query(
+        "update tenant.device set status = 'active'
+         where id = $1 and status in ('pending_review', 'flagged')
+         returning client_id, possible_clone_of",
+    )
+    .bind(device_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    else {
+        return Ok(None);
+    };
+    let client_id: Uuid = dev.try_get("client_id")?;
+    let clone_of: Option<Uuid> = dev.try_get("possible_clone_of")?;
+    let activated = sqlx::query(&format!(
+        "update tenant.agent set status = 'active'
+         where device_id = $1 and status = 'suspect_clone' {AGENT_RETURNING}"
+    ))
+    .bind(device_id)
+    .fetch_all(&mut **tx)
+    .await?
+    .iter()
+    .map(agent_row)
+    .collect::<Result<Vec<_>>>()?;
+    let superseded = match clone_of {
+        Some(old) => sqlx::query(&format!(
+            "update tenant.agent set status = 'superseded'
+             where device_id = $1 and client_id = $2 and status in ('active', 'suspect_clone')
+             {AGENT_RETURNING}"
+        ))
+        .bind(old)
+        .bind(client_id)
+        .fetch_all(&mut **tx)
+        .await?
+        .iter()
+        .map(agent_row)
+        .collect::<Result<Vec<_>>>()?,
+        None => Vec::new(),
+    };
+    Ok(Some(Approval {
+        client_id,
+        activated,
+        superseded,
+    }))
+}
+
+/// Reject a `pending_review` or `flagged` device: its live agents become
+/// `revoked`. Returns `(client_id, revoked agents)`; `None` if the device is
+/// unknown, out of scope or not held.
+pub async fn reject_device(
+    tx: &mut Tx<'_>,
+    device_id: Uuid,
+) -> Result<Option<(Uuid, Vec<AgentRow>)>> {
+    let Some(dev) = sqlx::query(
+        "select client_id from tenant.device
+         where id = $1 and status in ('pending_review', 'flagged')",
+    )
+    .bind(device_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    else {
+        return Ok(None);
+    };
+    let client_id: Uuid = dev.try_get("client_id")?;
+    let revoked = sqlx::query(&format!(
+        "update tenant.agent set status = 'revoked'
+         where device_id = $1 and status in ('active', 'suspect_clone') {AGENT_RETURNING}"
+    ))
+    .bind(device_id)
+    .fetch_all(&mut **tx)
+    .await?
+    .iter()
+    .map(agent_row)
+    .collect::<Result<Vec<_>>>()?;
+    Ok(Some((client_id, revoked)))
+}
+
+/// Set a client's status (`active` or `disabled`); false if unknown.
+pub async fn set_client_status(tx: &mut Tx<'_>, client_id: Uuid, status: &str) -> Result<bool> {
+    let res = sqlx::query("update tenant.client set status = $2 where id = $1")
+        .bind(client_id)
+        .bind(status)
+        .execute(&mut **tx)
+        .await?;
+    Ok(res.rows_affected() == 1)
+}
+
 /// Look up an agent by its credential public key.
 pub async fn agent_by_pubkey(tx: &mut Tx<'_>, pubkey: &[u8; 32]) -> Result<Option<AgentAuthRow>> {
     let row = sqlx::query_as!(
@@ -374,4 +512,15 @@ pub async fn insert_audit(
     .execute(&mut **tx)
     .await?;
     Ok(())
+}
+
+/// Number of audit events with this action and target.
+pub async fn count_audit(tx: &mut Tx<'_>, action: &str, target: &str) -> Result<i64> {
+    let n = sqlx::query("select count(*) from msp.audit_event where action = $1 and target = $2")
+        .bind(action)
+        .bind(target)
+        .fetch_one(&mut **tx)
+        .await?
+        .try_get(0)?;
+    Ok(n)
 }

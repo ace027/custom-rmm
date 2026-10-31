@@ -126,6 +126,8 @@ impl Modify for BearerAuth {
         enroll::enroll,
         admin::create_enrollment_token,
         admin::revoke_agent,
+        admin::approve_device,
+        admin::reject_device,
         admin::put_trust
     ),
     components(schemas(
@@ -156,6 +158,14 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/agents/{agent_id}/revoke",
             post(admin::revoke_agent),
         )
+        .route(
+            "/api/v1/devices/{device_id}/approve",
+            post(admin::approve_device),
+        )
+        .route(
+            "/api/v1/devices/{device_id}/reject",
+            post(admin::reject_device),
+        )
         .route("/api/v1/trust/{kind}", put(admin::put_trust))
         .with_state(state)
 }
@@ -179,6 +189,8 @@ mod tests {
             "/v1/enroll",
             "/api/v1/enrollment-tokens",
             "/api/v1/agents/{agent_id}/revoke",
+            "/api/v1/devices/{device_id}/approve",
+            "/api/v1/devices/{device_id}/reject",
             "/api/v1/trust/{kind}",
         ] {
             assert!(doc.paths.paths.contains_key(p), "missing {p}");

@@ -7,6 +7,7 @@ use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use rand::TryRng;
 use rmm_db::repo::{self, NewToken};
 use rmm_db::scope::{Scope, begin_scoped};
@@ -151,6 +152,49 @@ pub async fn create_enrollment_token(
     ))
 }
 
+/// Publish a revocation notice per agent so authd kicks their connections.
+/// False when any notice could not be handed to NATS (or no client is
+/// configured): the database change is already committed, so the caller
+/// reports a retryable failure instead of claiming the kick happened.
+async fn publish_kicks(state: &AppState, agents: &[repo::AgentRow]) -> bool {
+    let Some(nats) = &state.nats else {
+        if !agents.is_empty() {
+            tracing::error!("no NATS client configured; revocation not published");
+        }
+        return agents.is_empty();
+    };
+    let mut ok = true;
+    for a in agents {
+        let payload = serde_json::json!({"agent_id": a.id, "nkey": a.nkey}).to_string();
+        if let Err(err) = nats.publish(REVOKED_SUBJECT, payload.into()).await {
+            tracing::error!(%err, agent_id = %a.id, "failed to publish agent revocation");
+            ok = false;
+        }
+    }
+    if let Err(err) = nats.flush().await {
+        tracing::error!(%err, "failed to flush agent revocations");
+        ok = false;
+    }
+    ok
+}
+
+/// 204, or 503 when the kick could not be published. The status change is
+/// committed either way; repeating the request republishes the kick.
+fn kick_response(published: bool) -> Response {
+    if published {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorBody {
+                error: "status changed but the connection kick could not be published; retry"
+                    .into(),
+            }),
+        )
+            .into_response()
+    }
+}
+
 /// Revoke an agent and tell NATS to drop its connection.
 #[utoipa::path(
     post,
@@ -158,22 +202,30 @@ pub async fn create_enrollment_token(
     params(("agent_id" = String, Path, description = "Agent id")),
     security(("bearer" = [])),
     responses(
-        (status = 204, description = "Agent revoked"),
+        (status = 204, description = "Agent revoked and connection kick published"),
         (status = 401, description = "Not authenticated", body = ErrorBody),
         (status = 403, description = "Missing RMM.Admin", body = ErrorBody),
-        (status = 404, description = "Unknown agent", body = ErrorBody)
+        (status = 404, description = "Unknown or superseded agent", body = ErrorBody),
+        (status = 503, description = "Agent revoked but the kick was not published; retry", body = ErrorBody)
     )
 )]
 pub async fn revoke_agent(
     State(state): State<AppState>,
     RequireRole(claims, _): RequireRole<Admin>,
     Path(agent_id): Path<Uuid>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<Response, ApiError> {
     let actor = claims.actor();
     let mut tx = begin_scoped(&state.pool, &Scope::Service("admin-revoke"), &actor).await?;
-    let row = repo::set_agent_status(&mut tx, agent_id, "revoked")
-        .await?
-        .ok_or_else(|| ApiError::NotFound("unknown agent".into()))?;
+    // Repeating a revoke is allowed (it republishes the kick); a superseded
+    // agent cannot be revoked.
+    let row = repo::transition_agent_status(
+        &mut tx,
+        agent_id,
+        &["active", "suspect_clone", "revoked"],
+        "revoked",
+    )
+    .await?
+    .ok_or_else(|| ApiError::NotFound("unknown agent".into()))?;
     repo::insert_audit(
         &mut tx,
         &actor,
@@ -185,16 +237,89 @@ pub async fn revoke_agent(
     .await?;
     tx.commit().await?;
 
-    let payload = serde_json::json!({"agent_id": row.id, "nkey": row.nkey}).to_string();
-    match &state.nats {
-        Some(nats) => {
-            if let Err(err) = nats.publish(REVOKED_SUBJECT, payload.into()).await {
-                tracing::warn!(%err, %agent_id, "failed to publish agent revocation");
-            }
-        }
-        None => tracing::warn!(%agent_id, "no NATS client configured; revocation not published"),
-    }
-    Ok(StatusCode::NO_CONTENT)
+    Ok(kick_response(
+        publish_kicks(&state, std::slice::from_ref(&row)).await,
+    ))
+}
+
+/// Approve a device held for review (`pending_review` or `flagged`).
+#[utoipa::path(
+    post,
+    path = "/api/v1/devices/{device_id}/approve",
+    params(("device_id" = String, Path, description = "Device id")),
+    security(("bearer" = [])),
+    responses(
+        (status = 204, description = "Device and its agent activated; the original device's agents superseded"),
+        (status = 401, description = "Not authenticated", body = ErrorBody),
+        (status = 403, description = "Missing RMM.Admin", body = ErrorBody),
+        (status = 404, description = "Unknown device or not held for review", body = ErrorBody),
+        (status = 503, description = "Approved but the kick of superseded agents was not published; retry", body = ErrorBody)
+    )
+)]
+pub async fn approve_device(
+    State(state): State<AppState>,
+    RequireRole(claims, _): RequireRole<Admin>,
+    Path(device_id): Path<Uuid>,
+) -> Result<Response, ApiError> {
+    let actor = claims.actor();
+    let mut tx = begin_scoped(&state.pool, &Scope::Service("admin-device"), &actor).await?;
+    let approval = repo::approve_device(&mut tx, device_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("device not held for review".into()))?;
+    let ids = |rows: &[repo::AgentRow]| rows.iter().map(|a| a.id).collect::<Vec<_>>();
+    repo::insert_audit(
+        &mut tx,
+        &actor,
+        "device.approve",
+        Some(approval.client_id),
+        &format!("device:{device_id}"),
+        &serde_json::json!({
+            "activated": ids(&approval.activated),
+            "superseded": ids(&approval.superseded),
+        }),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(kick_response(
+        publish_kicks(&state, &approval.superseded).await,
+    ))
+}
+
+/// Reject a device held for review: its agents are revoked.
+#[utoipa::path(
+    post,
+    path = "/api/v1/devices/{device_id}/reject",
+    params(("device_id" = String, Path, description = "Device id")),
+    security(("bearer" = [])),
+    responses(
+        (status = 204, description = "Agents of the device revoked and kick published"),
+        (status = 401, description = "Not authenticated", body = ErrorBody),
+        (status = 403, description = "Missing RMM.Admin", body = ErrorBody),
+        (status = 404, description = "Unknown device or not held for review", body = ErrorBody),
+        (status = 503, description = "Rejected but the kick was not published; retry", body = ErrorBody)
+    )
+)]
+pub async fn reject_device(
+    State(state): State<AppState>,
+    RequireRole(claims, _): RequireRole<Admin>,
+    Path(device_id): Path<Uuid>,
+) -> Result<Response, ApiError> {
+    let actor = claims.actor();
+    let mut tx = begin_scoped(&state.pool, &Scope::Service("admin-device"), &actor).await?;
+    let (client_id, revoked) = repo::reject_device(&mut tx, device_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("device not held for review".into()))?;
+    repo::insert_audit(
+        &mut tx,
+        &actor,
+        "device.reject",
+        Some(client_id),
+        &format!("device:{device_id}"),
+        &serde_json::json!({"revoked": revoked.iter().map(|a| a.id).collect::<Vec<_>>()}),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(kick_response(publish_kicks(&state, &revoked).await))
 }
 
 struct SystemClock;

@@ -107,22 +107,11 @@ fn with_statement_timeout(url: &str) -> String {
     format!("{url}{sep}options[statement_timeout]=2000")
 }
 
-/// Connect (retrying forever) and then probe the database every 15 s.
-async fn db_task(url: String, cell: Arc<OnceLock<Db>>, health: Arc<Health>) {
-    let url = with_statement_timeout(&url);
-    let mut backoff = Duration::from_millis(500);
-    let pool = loop {
-        match rmm_db::scope::connect_as(&url, "rmm_authd").await {
-            Ok(p) => break p,
-            Err(err) => {
-                tracing::warn!(%err, "database connect failed, retrying");
-                tokio::time::sleep(backoff).await;
-                backoff = (backoff * 2).min(Duration::from_secs(10));
-            }
-        }
-    };
+/// Connect as the restricted `rmm_authd` role and wrap the pool in a [`Db`].
+async fn connect_db(url: &str) -> std::result::Result<Db, DbError> {
+    let pool = rmm_db::scope::connect_as(&with_statement_timeout(url), "rmm_authd").await?;
     let (p1, p2) = (pool.clone(), pool);
-    let db = Db {
+    Ok(Db {
         begin: Box::new(move || {
             let pool = p1.clone();
             Box::pin(async move {
@@ -133,6 +122,21 @@ async fn db_task(url: String, cell: Arc<OnceLock<Db>>, health: Arc<Health>) {
             let pool = p2.clone();
             Box::pin(async move { rmm_db::ping(&pool).await })
         }),
+    })
+}
+
+/// Connect (retrying forever) and then probe the database every 15 s.
+async fn db_task(url: String, cell: Arc<OnceLock<Db>>, health: Arc<Health>) {
+    let mut backoff = Duration::from_millis(500);
+    let db = loop {
+        match connect_db(&url).await {
+            Ok(db) => break db,
+            Err(err) => {
+                tracing::warn!(%err, "database connect failed, retrying");
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(Duration::from_secs(10));
+            }
+        }
     };
     let db = cell.get_or_init(|| db);
     tracing::info!("database connected");
@@ -580,5 +584,262 @@ mod tests {
         assert_eq!(v["sub"], user.public_key());
         assert_eq!(v["nats"]["error"], DENY_MESSAGE);
         assert!(v["nats"].get("jwt").is_none());
+    }
+
+    // --- database-backed decision tests -------------------------------
+    //
+    // rmm-server has no direct sqlx dependency, so these run against the
+    // database named by DATABASE_URL (migrated in place, unique names per
+    // run) rather than through `sqlx::test`. Skipped when it is unset.
+
+    use natsjwt::{ClientInfo, ConnectOpts, PREFIX_USER};
+    use rmm_db::repo::{NewAgent, NewDevice};
+    use uuid::Uuid;
+
+    /// Superuser-ish access for seeding and for reading audit rows back.
+    async fn admin_db(url: &str) -> Db {
+        let pool = rmm_db::connect(url).await.unwrap();
+        rmm_db::migrate(&pool).await.unwrap();
+        Db {
+            begin: Box::new(move || {
+                let pool = pool.clone();
+                Box::pin(async move {
+                    rmm_db::scope::begin_scoped(&pool, &Scope::Service("authd-test"), "test").await
+                })
+            }),
+            ping: Box::new(|| Box::pin(async { Ok(1) })),
+        }
+    }
+
+    struct Seeded {
+        agent_id: Uuid,
+        client_id: Uuid,
+        key: KeyPair,
+    }
+
+    async fn seed_client(admin: &Db) -> (Uuid, Uuid) {
+        let mut tx = (admin.begin)().await.unwrap();
+        let client = repo::create_client(&mut tx, &format!("authd-{}", Uuid::new_v4()))
+            .await
+            .unwrap();
+        let site = repo::create_site(&mut tx, client, "main", "UTC")
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        (client, site)
+    }
+
+    /// An active agent in the given client; `stored_nkey` overrides the nkey
+    /// the database holds for it.
+    async fn seed_agent(
+        admin: &Db,
+        client: Uuid,
+        site: Uuid,
+        stored_nkey: Option<String>,
+    ) -> Seeded {
+        let key = KeyPair::new_user();
+        let pk = natsjwt::public_key_bytes(&key.public_key(), PREFIX_USER).unwrap();
+        let mut tx = (admin.begin)().await.unwrap();
+        let device = repo::insert_device(
+            &mut tx,
+            NewDevice {
+                client_id: client,
+                site_id: site,
+                hw_fingerprint: Uuid::new_v4().as_bytes().to_vec(),
+                fp_strength: "strong".into(),
+                smbios_uuid: None,
+                system_serial: None,
+                board_serial: None,
+                os_family: "linux".into(),
+                hostname: "host".into(),
+                status: "active".into(),
+                possible_clone_of: None,
+            },
+        )
+        .await
+        .unwrap();
+        let agent_id = repo::insert_agent(
+            &mut tx,
+            NewAgent {
+                client_id: client,
+                device_id: device,
+                credential_pubkey: pk,
+                nkey: stored_nkey.unwrap_or_else(|| key.public_key()),
+                version: "0.1.0".into(),
+            },
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        Seeded {
+            agent_id,
+            client_id: client,
+            key,
+        }
+    }
+
+    /// A request for `key` as the server would forward it.
+    fn request(key: &KeyPair, conn_type: &str, good_sig: bool) -> AuthRequest {
+        let nonce = "nonce-1234";
+        let other = KeyPair::new_user();
+        let signer = if good_sig { key } else { &other };
+        let sig = signer.sign(nonce.as_bytes()).unwrap();
+        AuthRequest {
+            user_nkey: KeyPair::new_user().public_key(),
+            server_id: "NSERVER".into(),
+            client_info: ClientInfo {
+                host: "10.0.0.5".into(),
+                nonce: nonce.into(),
+                cid: 42,
+                kind: "Client".into(),
+                conn_type: conn_type.into(),
+            },
+            connect_opts: ConnectOpts {
+                nkey: key.public_key(),
+                sig: data_encoding::BASE64URL_NOPAD.encode(&sig),
+                name: "rmm-agent/0.1".into(),
+            },
+        }
+    }
+
+    async fn audits(admin: &Db, action: &str, target: &str) -> i64 {
+        let mut tx = (admin.begin)().await.unwrap();
+        let n = repo::count_audit(&mut tx, action, target).await.unwrap();
+        tx.commit().await.unwrap();
+        n
+    }
+
+    async fn set_status(admin: &Db, agent: Uuid, from: &[&str], to: &str) {
+        let mut tx = (admin.begin)().await.unwrap();
+        let row = repo::transition_agent_status(&mut tx, agent, from, to)
+            .await
+            .unwrap();
+        assert!(row.is_some());
+        tx.commit().await.unwrap();
+    }
+
+    fn denied(d: &Decision, needle: &str) {
+        match d {
+            Decision::Deny(r) => assert!(r.contains(needle), "deny reason {r:?} lacks {needle:?}"),
+            Decision::Allow(_) => panic!("expected deny containing {needle:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn decisions_against_the_database() {
+        let Ok(url) = std::env::var("DATABASE_URL") else {
+            eprintln!("DATABASE_URL not set; skipping database decision test");
+            return;
+        };
+        let admin = admin_db(&url).await;
+        let authd = connect_db(&url).await.unwrap();
+        let (client, site) = seed_client(&admin).await;
+
+        // Active agent: allowed, audited, last_seen touched by the allow path.
+        let ok = seed_agent(&admin, client, site, None).await;
+        match decide(Some(&authd), &request(&ok.key, "websocket", true)).await {
+            Decision::Allow(a) => {
+                assert_eq!(a.agent_id, ok.agent_id);
+                assert_eq!(a.client_id, ok.client_id);
+            }
+            Decision::Deny(r) => panic!("active agent denied: {r}"),
+        }
+        let target = format!("agent:{}", ok.agent_id);
+        assert_eq!(audits(&admin, "nats.auth.allow", &target).await, 1);
+        assert_eq!(audits(&admin, "nats.auth.deny", &target).await, 0);
+        // An empty connection type (older servers) is also accepted.
+        assert!(matches!(
+            decide(Some(&authd), &request(&ok.key, "", true)).await,
+            Decision::Allow(_)
+        ));
+
+        // Revoked and suspect_clone agents are refused and audited.
+        for (status, needle) in [
+            ("revoked", "agent status revoked"),
+            ("suspect_clone", "suspect_clone"),
+        ] {
+            let a = seed_agent(&admin, client, site, None).await;
+            set_status(&admin, a.agent_id, &["active"], status).await;
+            denied(
+                &decide(Some(&authd), &request(&a.key, "websocket", true)).await,
+                needle,
+            );
+            let target = format!("agent:{}", a.agent_id);
+            assert_eq!(
+                audits(&admin, "nats.auth.deny", &target).await,
+                1,
+                "{status}"
+            );
+            assert_eq!(
+                audits(&admin, "nats.auth.allow", &target).await,
+                0,
+                "{status}"
+            );
+        }
+
+        // Superseded agents are refused too.
+        let sup = seed_agent(&admin, client, site, None).await;
+        set_status(&admin, sup.agent_id, &["active"], "superseded").await;
+        denied(
+            &decide(Some(&authd), &request(&sup.key, "websocket", true)).await,
+            "superseded",
+        );
+
+        // Agent of a disabled client is refused.
+        let (client2, site2) = seed_client(&admin).await;
+        let susp = seed_agent(&admin, client2, site2, None).await;
+        {
+            let mut tx = (admin.begin)().await.unwrap();
+            assert!(
+                repo::set_client_status(&mut tx, client2, "disabled")
+                    .await
+                    .unwrap()
+            );
+            tx.commit().await.unwrap();
+        }
+        denied(
+            &decide(Some(&authd), &request(&susp.key, "websocket", true)).await,
+            "client status disabled",
+        );
+        let target = format!("agent:{}", susp.agent_id);
+        assert_eq!(audits(&admin, "nats.auth.deny", &target).await, 1);
+
+        // Stored nkey differs from the presented one.
+        let other = KeyPair::new_user().public_key();
+        let mism = seed_agent(&admin, client, site, Some(other)).await;
+        denied(
+            &decide(Some(&authd), &request(&mism.key, "websocket", true)).await,
+            "nkey does not match",
+        );
+        let target = format!("agent:{}", mism.agent_id);
+        assert_eq!(audits(&admin, "nats.auth.deny", &target).await, 1);
+
+        // Unknown key: denied, audited against the presented nkey.
+        let stranger = KeyPair::new_user();
+        denied(
+            &decide(Some(&authd), &request(&stranger, "websocket", true)).await,
+            "unknown agent",
+        );
+        let target = format!("nkey:{}", clip(&stranger.public_key()));
+        assert_eq!(audits(&admin, "nats.auth.deny", &target).await, 1);
+
+        // Bad signature and wrong transport never reach an allow, even for an
+        // active agent, and are audited.
+        let a = seed_agent(&admin, client, site, None).await;
+        let nkey_target = format!("nkey:{}", clip(&a.key.public_key()));
+        denied(
+            &decide(Some(&authd), &request(&a.key, "websocket", false)).await,
+            "signature",
+        );
+        assert_eq!(audits(&admin, "nats.auth.deny", &nkey_target).await, 1);
+        denied(
+            &decide(Some(&authd), &request(&a.key, "nats", true)).await,
+            "connection type",
+        );
+        assert_eq!(audits(&admin, "nats.auth.deny", &nkey_target).await, 2);
+        assert_eq!(
+            audits(&admin, "nats.auth.allow", &format!("agent:{}", a.agent_id)).await,
+            0
+        );
     }
 }
