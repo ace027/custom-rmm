@@ -57,7 +57,7 @@
 ## Escalations
 | # | Severity | Type | Decision | Status | Resolution |
 |---|----------|------|----------|--------|------------|
-| 1 | warning | schema | CommandBody::Collect { kind } is sent on the wire as `collect_kind`. The Rust field name stays `kind` and the enum tag stays "kind". | pending |  |
+| 1 | warning | schema | CommandBody::Collect { kind } is sent on the wire as `collect_kind`. The Rust field name stays `kind` and the enum tag stays "kind". | approved | Accepted as the wire name for CommandBody::Collect's field (enum tag already uses "kind"); no consumers exist yet. |
 
 - #1 context: With the plan's tag "kind", serde would write two "kind" map keys for Collect, and the canonical encoder rejects duplicate keys, so the interface as written cannot be encoded. I kept the plan's Rust API and tag and renamed only the field's wire key. The alternative is changing the tag (for example "op"), which would change the wire format of every CommandBody variant. Please confirm, or pick the other option before plan 02-04 or the API emit commands. The vector test command_body_tag_is_kind locks the current choice.
 
