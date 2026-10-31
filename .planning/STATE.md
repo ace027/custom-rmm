@@ -2,12 +2,12 @@
 
 ## Current Position
 - **Phase**: 2 of 9 (executing)
-- **Status**: Phase 2 executing — Plan 02-01 complete
-- **Last Activity**: Plan 02-01 execution (2026-10-31)
+- **Status**: Phase 2 executing — Plan 02-03 complete
+- **Last Activity**: Plan 02-03 execution (2026-10-31)
 
 ## Progress
 ```
-[##..................] 13% — 4/29 plans complete
+[####................] 20% — 6/29 plans complete
 ```
 
 ## Recent Decisions
@@ -38,3 +38,5 @@ Run `/triad:build` to execute Phase 2: Trust core and signing CLI
 ## Phase 2 Results
 (build started 2026-10-31)
 - Plan 02-01 (Wave 1): Canonical CBOR codec, keys and signed envelope — Complete
+- Plan 02-02 (Wave 2): Trust documents, manifest chain and revocation verification — Complete with Warnings
+- Plan 02-03 (Wave 2): WebAuthn assertion verification — Complete
