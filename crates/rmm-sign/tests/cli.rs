@@ -447,3 +447,122 @@ fn bad_backend_is_rejected() {
     let out = run(&["pubkey", "--backend", "usb"]);
     assert!(!out.status.success());
 }
+
+/// Sign a manifest and a techlist, returning (dir, root, manifest env, techlist env).
+fn signed_chain() -> (PathBuf, Key, PathBuf, PathBuf) {
+    let dir = tmp();
+    let root = keygen(&dir, "root.age");
+    let tech = keygen(&dir, "tech.age");
+    let draft = write(&dir, "m.json", &manifest_json(&[&root], 1, &tech));
+    let menv = dir.join("m.env");
+    ok(&sign_args("manifest", s(&draft), &backend(&root), s(&menv)));
+    let tl = write(&dir, "t.json", &techlist_json(1, "shell"));
+    let tenv = dir.join("t.env");
+    ok(&sign_args("techlist", s(&tl), &backend(&tech), s(&tenv)));
+    (dir, root, menv, tenv)
+}
+
+fn assert_expired(out: &Output) {
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("expired"), "stderr: {err}");
+}
+
+#[test]
+fn expired_manifest_fails_verify() {
+    let (_dir, root, menv, _) = signed_chain();
+    let now = (NOW + 101 * DAY).to_string();
+    let out = run(&[
+        "verify",
+        "--roots",
+        &root.public_key,
+        "--root-threshold",
+        "1",
+        "--now",
+        &now,
+        s(&menv),
+    ]);
+    assert_expired(&out);
+}
+
+#[test]
+fn expired_techlist_fails_verify() {
+    let (_dir, root, menv, tenv) = signed_chain();
+    // Techlist expires at NOW + 30d; the manifest is still valid then.
+    let now = (NOW + 31 * DAY).to_string();
+    let out = run(&[
+        "verify",
+        "--roots",
+        &root.public_key,
+        "--root-threshold",
+        "1",
+        "--manifest",
+        s(&menv),
+        "--now",
+        &now,
+        s(&tenv),
+    ]);
+    assert_expired(&out);
+}
+
+#[test]
+fn expired_command_fails_verify() {
+    let dir = tmp();
+    let root = keygen(&dir, "root.age");
+    let cmdkey = keygen(&dir, "cmd.age");
+    let manifest = manifest_json(&[&root], 1, &cmdkey)
+        .replace("\"roles\": [\"techlist\"]", "\"roles\": [\"command\"]")
+        .replace(
+            "\"thresholds\": {\"techlist\": 1}",
+            "\"thresholds\": {\"command\": 1}",
+        );
+    let draft = write(&dir, "m.json", &manifest);
+    let menv = dir.join("m.env");
+    ok(&sign_args("manifest", s(&draft), &backend(&root), s(&menv)));
+
+    let cmd = format!(
+        r#"{{
+  "cmd_id": "{id}",
+  "agent_id": "agent-1",
+  "client_id": "client-1",
+  "issued_at": {NOW},
+  "expires_at": {exp},
+  "policy_hash": "{ph}",
+  "body": {{"kind": "collect", "collect_kind": "inventory"}}
+}}"#,
+        id = "11".repeat(16),
+        ph = "22".repeat(32),
+        exp = NOW + 600,
+    );
+    let cdraft = write(&dir, "c.json", &cmd);
+    let cenv = dir.join("c.env");
+    ok(&sign_args(
+        "command",
+        s(&cdraft),
+        &backend(&cmdkey),
+        s(&cenv),
+    ));
+
+    let verify_at = |now: u64| {
+        let now = now.to_string();
+        run(&[
+            "verify",
+            "--roots",
+            &root.public_key,
+            "--root-threshold",
+            "1",
+            "--manifest",
+            s(&menv),
+            "--now",
+            &now,
+            s(&cenv),
+        ])
+    };
+    let fresh = verify_at(NOW + 1);
+    assert!(
+        fresh.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fresh.stderr)
+    );
+    assert_expired(&verify_at(NOW + 600));
+}

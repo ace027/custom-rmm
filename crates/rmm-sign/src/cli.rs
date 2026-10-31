@@ -483,6 +483,12 @@ fn verify(
                 decode_doc(&env.payload.0).map_err(|e| anyhow!("verification failed: {e}"))?;
             cmd.validate()
                 .map_err(|e| anyhow!("verification failed: {e}"))?;
+            if cmd.issued_at > now.saturating_add(rmm_trust::docs::SKEW_SECS) {
+                bail!("verification failed: document not yet valid");
+            }
+            if now >= cmd.expires_at {
+                bail!("verification failed: document expired");
+            }
             ids
         }
     };

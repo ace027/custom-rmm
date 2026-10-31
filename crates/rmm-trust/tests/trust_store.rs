@@ -211,7 +211,7 @@ fn happy_path_chain() {
     assert_eq!(seq.get(DocKind::Manifest).map(|s| s.0), Some(1));
     store.trust_fresh(NOW).expect("fresh");
 
-    let mut replay = MemoryReplayCache::new();
+    let mut replay = MemoryReplayCache::new(FixedClock(NOW));
     let cmd = fx.command(1, collect());
     let got = store
         .verify_command(&fx.signed_cmd(&cmd), AGENT, CLIENT, &clock(), &mut replay)
@@ -474,7 +474,7 @@ fn revocations_expired_by_one_second_are_stale() {
     store.trust_fresh(NOW + 99).expect("still fresh");
     assert_eq!(store.trust_fresh(NOW + 101), Err(TrustError::Stale));
 
-    let mut replay = MemoryReplayCache::new();
+    let mut replay = MemoryReplayCache::new(FixedClock(NOW));
     let cmd = fx.command(1, collect());
     assert_eq!(
         store.verify_command(&fx.signed_cmd(&cmd), AGENT, CLIENT, &later, &mut replay),
@@ -506,7 +506,7 @@ fn missing_revocations_are_stale() {
 fn command_for_other_agent_or_client() {
     let fx = Fx::new();
     let (store, _) = fx.ready();
-    let mut replay = MemoryReplayCache::new();
+    let mut replay = MemoryReplayCache::new(FixedClock(NOW));
     let mut cmd = fx.command(1, collect());
     cmd.agent_id = "agent-2".into();
     assert_eq!(
@@ -529,7 +529,7 @@ fn command_for_other_agent_or_client() {
 fn replayed_command_is_rejected() {
     let fx = Fx::new();
     let (store, _) = fx.ready();
-    let mut replay = MemoryReplayCache::new();
+    let mut replay = MemoryReplayCache::new(FixedClock(NOW));
     let bytes = fx.signed_cmd(&fx.command(1, collect()));
     store
         .verify_command(&bytes, AGENT, CLIENT, &clock(), &mut replay)
@@ -544,7 +544,7 @@ fn replayed_command_is_rejected() {
 fn expired_command_is_rejected() {
     let fx = Fx::new();
     let (store, _) = fx.ready();
-    let mut replay = MemoryReplayCache::new();
+    let mut replay = MemoryReplayCache::new(FixedClock(NOW));
     let cmd = fx.command(1, collect());
     assert_eq!(
         store.verify_command(
@@ -562,7 +562,7 @@ fn expired_command_is_rejected() {
 fn command_from_the_future_beyond_skew() {
     let fx = Fx::new();
     let (store, _) = fx.ready();
-    let mut replay = MemoryReplayCache::new();
+    let mut replay = MemoryReplayCache::new(FixedClock(NOW));
     let mut cmd = fx.command(1, collect());
     cmd.issued_at = NOW + 301;
     cmd.expires_at = NOW + 900;
@@ -590,7 +590,7 @@ fn command_ttl_over_seven_days_is_invalid() {
             AGENT,
             CLIENT,
             &clock(),
-            &mut MemoryReplayCache::new()
+            &mut MemoryReplayCache::new(FixedClock(NOW))
         ),
         Err(TrustError::InvalidDocument(_))
     ));
@@ -611,7 +611,7 @@ fn tampered_command_fails_signature() {
             "agent-2",
             CLIENT,
             &clock(),
-            &mut MemoryReplayCache::new()
+            &mut MemoryReplayCache::new(FixedClock(NOW))
         ),
         Err(TrustError::BadSignature)
     );
@@ -628,7 +628,7 @@ fn command_signed_by_wrong_role_key() {
             AGENT,
             CLIENT,
             &clock(),
-            &mut MemoryReplayCache::new()
+            &mut MemoryReplayCache::new(FixedClock(NOW))
         ),
         Err(TrustError::WrongRole)
     );
@@ -646,7 +646,7 @@ fn unknown_signer_is_rejected() {
             AGENT,
             CLIENT,
             &clock(),
-            &mut MemoryReplayCache::new()
+            &mut MemoryReplayCache::new(FixedClock(NOW))
         ),
         Err(TrustError::UnknownKey)
     );
@@ -671,7 +671,7 @@ fn expired_cert_does_not_count() {
             AGENT,
             CLIENT,
             &clock(),
-            &mut MemoryReplayCache::new()
+            &mut MemoryReplayCache::new(FixedClock(NOW))
         ),
         Err(TrustError::CertNotValid)
     );
@@ -787,7 +787,7 @@ fn artifact_revocation_by_content_id() {
             params: BTreeMap::new(),
         },
     );
-    let mut replay = MemoryReplayCache::new();
+    let mut replay = MemoryReplayCache::new(FixedClock(NOW));
     assert_eq!(
         store.verify_command(&fx.signed_cmd(&cmd), AGENT, CLIENT, &clock(), &mut replay),
         Err(TrustError::ArtifactRevoked)
@@ -822,7 +822,7 @@ fn documents_without_manifest_are_rejected() {
             AGENT,
             CLIENT,
             &clock(),
-            &mut MemoryReplayCache::new()
+            &mut MemoryReplayCache::new(FixedClock(NOW))
         ),
         Err(TrustError::NoManifest)
     );
@@ -918,7 +918,7 @@ fn too_many_signatures_rejected() {
             AGENT,
             CLIENT,
             &clock(),
-            &mut MemoryReplayCache::new()
+            &mut MemoryReplayCache::new(FixedClock(NOW))
         ),
         Err(TrustError::InvalidDocument(_))
     ));
