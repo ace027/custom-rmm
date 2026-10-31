@@ -375,22 +375,41 @@ fn sign(a: &SignArgs) -> Result<()> {
 }
 
 fn write_out(path: &Path, bytes: &[u8], force: bool) -> Result<()> {
-    let mut opts = OpenOptions::new();
-    opts.write(true);
-    if force {
-        opts.create(true).truncate(true);
-    } else {
-        opts.create_new(true);
+    let werr = |e: std::io::Error| anyhow!("cannot write {}: {e}", path.display());
+    if !force {
+        let mut f = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .map_err(|e| {
+                if e.kind() == ErrorKind::AlreadyExists {
+                    anyhow::Error::from(FileError::Exists(path.to_owned()))
+                } else {
+                    werr(e)
+                }
+            })?;
+        f.write_all(bytes).map_err(werr)?;
+        return f.sync_all().map_err(werr);
     }
-    let mut f = opts.open(path).map_err(|e| {
-        if e.kind() == ErrorKind::AlreadyExists {
-            anyhow::Error::from(FileError::Exists(path.to_owned()))
-        } else {
-            anyhow!("cannot write {}: {e}", path.display())
-        }
-    })?;
-    f.write_all(bytes)
-        .with_context(|| format!("cannot write {}", path.display()))
+    // Overwrite atomically: write a sibling temp file, sync, then rename.
+    let mut name = path.as_os_str().to_owned();
+    name.push(".tmp");
+    let tmp = std::path::PathBuf::from(name);
+    let res = (|| -> std::io::Result<()> {
+        let mut f = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if let Err(e) = res {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(werr(e));
+    }
+    Ok(())
 }
 
 fn now_unix() -> Result<u64> {
@@ -446,7 +465,7 @@ fn verify(
                 .manifest()
                 .ok_or_else(|| anyhow!("manifest was not installed"))?;
             let keys = installed.root_public_keys().map_err(|e| anyhow!("{e}"))?;
-            let mut ids: Vec<KeyId> = env
+            let ids: std::collections::BTreeSet<KeyId> = env
                 .sigs
                 .iter()
                 .filter(|s| {
@@ -455,8 +474,7 @@ fn verify(
                 })
                 .map(|s| s.key_id)
                 .collect();
-            ids.dedup();
-            ids
+            ids.into_iter().collect()
         }
         DocType::Revocations => {
             store

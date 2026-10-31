@@ -46,12 +46,13 @@ fn io_err(path: &Path) -> impl FnOnce(std::io::Error) -> FileError + '_ {
 }
 
 /// Read the passphrase from the environment or prompt (twice when `confirm`).
+/// The environment variable is intended for tests and CI only.
 pub fn passphrase(confirm: bool) -> Result<SecretString, FileError> {
-    if let Ok(p) = std::env::var(PASSPHRASE_ENV) {
+    if let Ok(p) = std::env::var(PASSPHRASE_ENV).map(Zeroizing::new) {
         if p.is_empty() {
             return Err(FileError::Other(format!("{PASSPHRASE_ENV} is empty")));
         }
-        return Ok(SecretString::from(p));
+        return Ok(SecretString::from(p.as_str().to_owned()));
     }
     let prompt = |msg: &str| {
         rpassword::prompt_password(msg)

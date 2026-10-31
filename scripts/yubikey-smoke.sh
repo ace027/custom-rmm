@@ -30,6 +30,20 @@ export RMM_SIGN_PASSPHRASE
 
 field() { awk -v k="$1:" '$1 == k { print $2 }'; }
 
+echo "== card touch policy (signature key must be Fixed or On)"
+command -v ykman >/dev/null || { echo "FAIL: ykman is required to check the touch policy" >&2; exit 1; }
+info=$(ykman openpgp info)
+# Take the first "Touch policy" value at or after the Signature key section;
+# the output layout varies between ykman versions, so match loosely.
+policy=$(awk 'tolower($0) ~ /signature key|^ *sig/ { s = 1 }
+  s && tolower($0) ~ /touch policy|fixed|^ *on *$/ && !done {
+    print tolower($0); done = 1 }' <<<"$info")
+echo "$policy"
+case "$policy" in
+  *fixed* | *" on"* | *"on") ;;
+  *) echo "FAIL: signature key touch policy is not fixed/on" >&2; exit 1 ;;
+esac
+
 echo "== card public key"
 card_out=$("$sign" pubkey --backend "$backend")
 echo "$card_out"

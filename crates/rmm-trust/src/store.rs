@@ -246,9 +246,7 @@ impl TrustStore {
         seq: &mut dyn SeqStore,
     ) -> Result<(), TrustError> {
         let now = clock.now();
-        if self.manifest.is_none() {
-            return Err(TrustError::NoManifest);
-        }
+        self.manifest_unexpired(now)?;
         let env = decode_typed(env_bytes, TYPE_REVOCATIONS)?;
         self.verify_role(&env, Role::ArtifactRevoke, now)?;
         let doc: ArtifactRevocations = decode_doc(&env.payload.0)?;
@@ -274,9 +272,7 @@ impl TrustStore {
         seq: &mut dyn SeqStore,
     ) -> Result<(), TrustError> {
         let now = clock.now();
-        if self.manifest.is_none() {
-            return Err(TrustError::NoManifest);
-        }
+        self.manifest_unexpired(now)?;
         let env = decode_typed(env_bytes, TYPE_TECHLIST)?;
         self.verify_role(&env, Role::Techlist, now)?;
         let doc: TechnicianList = decode_doc(&env.payload.0)?;
@@ -291,6 +287,15 @@ impl TrustStore {
         seq.put(DocKind::Techlist, doc.seq, content_id);
         self.techlist = Some(doc);
         self.techlist_env = Some(env);
+        Ok(())
+    }
+
+    /// Installing documents requires an installed, unexpired manifest.
+    fn manifest_unexpired(&self, now: u64) -> Result<(), TrustError> {
+        let m = self.manifest.as_ref().ok_or(TrustError::NoManifest)?;
+        if now >= m.expires_at {
+            return Err(TrustError::Stale);
+        }
         Ok(())
     }
 
