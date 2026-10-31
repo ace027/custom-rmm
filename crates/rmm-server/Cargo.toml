@@ -10,6 +10,8 @@ version.workspace = true
 [dependencies]
 rmm-api.workspace = true
 rmm-db.workspace = true
+rmm-trust.workspace = true
+rmm-proto.workspace = true
 utoipa.workspace = true
 serde_json.workspace = true
 clap.workspace = true
@@ -19,6 +21,12 @@ tracing-subscriber.workspace = true
 tokio.workspace = true
 axum.workspace = true
 async-nats.workspace = true
+nkeys.workspace = true
+data-encoding.workspace = true
+uuid.workspace = true
+jsonwebtoken.workspace = true
+sha2.workspace = true
+ed25519-dalek.workspace = true
 
 [dev-dependencies]
 tower.workspace = true

@@ -23,7 +23,16 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"]
 clap = { version = "4", features = ["derive"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "migrate", "uuid", "chrono"] }
 rustix = { version = "1", features = ["system"] }
-windows = { version = "0.62", features = ["Win32_System_SystemInformation", "Win32_Foundation"] }
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Memory",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+] }
 tower = { version = "0.5", features = ["util"] }
 ciborium = "0.2"
 sha2 = "0.11"
@@ -35,6 +44,13 @@ proptest = "1"
 age = "0.12"
 similar = "3"
 rpassword = "7"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+nkeys = "0.4"
+jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs"] }
+data-encoding = "2"
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+rand = "0.10"
+zeroize = "1"
 openpgp-card = "0.7"
 card-backend-pcsc = "0.5"
 

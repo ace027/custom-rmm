@@ -1,5 +1,11 @@
 //! Platform abstraction with per-OS implementations.
 
+mod keystore;
+pub mod smbios;
+
+pub use keystore::{KeyStore, default_state_dir, keystore};
+pub use rmm_proto::enroll::HwFacts;
+
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]
@@ -26,6 +32,13 @@ pub enum PlatformError {
 pub trait Platform {
     /// DNS host name of this machine.
     fn hostname(&self) -> Result<String, PlatformError>;
+
+    /// Hardware identifiers for the device fingerprint; fields that cannot be
+    /// read (containers, missing firmware tables) are `None`.
+    fn hw_facts(&self) -> HwFacts;
+
+    /// `(os_family, os_version)`, e.g. `("windows", "Windows 11 Pro 24H2 (build 26100)")`.
+    fn os_info(&self) -> (String, String);
 }
 
 /// The platform implementation for the current target OS.

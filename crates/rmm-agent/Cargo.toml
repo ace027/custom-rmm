@@ -9,6 +9,12 @@ version.workspace = true
 
 [dependencies]
 rmm-agent-core.workspace = true
+rmm-platform.workspace = true
+clap.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [lints]
 workspace = true
