@@ -30,6 +30,20 @@ if run_check "$work/b"; then echo "FAIL: agent sign violation not detected"; exi
 saw_fail "$work/b" || { echo "FAIL: no rule FAIL line for (b)"; exit 1; }
 echo "PASS: agent sign violation detected"
 
+# (d) server crate depends on rmm-platform (rmm-server)
+fresh_copy "$work/d"
+sed -i '/^\[dependencies\]/a rmm-platform = { path = "../rmm-platform" }' "$work/d/crates/rmm-server/Cargo.toml"
+if run_check "$work/d"; then echo "FAIL: rmm-server->platform violation not detected"; exit 1; fi
+saw_fail "$work/d" || { echo "FAIL: no rule FAIL line for (d)"; exit 1; }
+echo "PASS: rmm-server->platform violation detected"
+
+# (e) rmm-watchdog depends on tokio
+fresh_copy "$work/e"
+sed -i '/^\[dependencies\]/a tokio.workspace = true' "$work/e/crates/rmm-watchdog/Cargo.toml"
+if run_check "$work/e"; then echo "FAIL: watchdog->tokio violation not detected"; exit 1; fi
+saw_fail "$work/e" || { echo "FAIL: no rule FAIL line for (e)"; exit 1; }
+echo "PASS: watchdog->tokio violation detected"
+
 # (c) unmodified copy passes
 fresh_copy "$work/c"
 if ! run_check "$work/c"; then echo "FAIL: clean copy rejected"; exit 1; fi

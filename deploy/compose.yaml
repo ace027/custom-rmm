@@ -24,7 +24,7 @@ services:
     environment:
       POSTGRES_DB: rmm
       POSTGRES_USER: rmm
-      POSTGRES_PASSWORD: ${RMM_PG_PASSWORD}
+      POSTGRES_PASSWORD: ${RMM_PG_PASSWORD:?set in deploy/.env}
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
@@ -39,10 +39,10 @@ services:
     image: nats:2.11-alpine
     command: ["-c", "/etc/nats/nats.conf"]
     environment:
-      RMM_NATS_API_PASSWORD: ${RMM_NATS_API_PASSWORD}
-      RMM_NATS_INGEST_PASSWORD: ${RMM_NATS_INGEST_PASSWORD}
-      RMM_NATS_AUTHD_PASSWORD: ${RMM_NATS_AUTHD_PASSWORD}
-      RMM_NATS_SYS_PASSWORD: ${RMM_NATS_SYS_PASSWORD}
+      RMM_NATS_API_PASSWORD: ${RMM_NATS_API_PASSWORD:?set in deploy/.env}
+      RMM_NATS_INGEST_PASSWORD: ${RMM_NATS_INGEST_PASSWORD:?set in deploy/.env}
+      RMM_NATS_AUTHD_PASSWORD: ${RMM_NATS_AUTHD_PASSWORD:?set in deploy/.env}
+      RMM_NATS_SYS_PASSWORD: ${RMM_NATS_SYS_PASSWORD:?set in deploy/.env}
     volumes:
       - ./nats/nats.conf:/etc/nats/nats.conf:ro
       - natsdata:/data
@@ -69,7 +69,7 @@ services:
     command: ["migrate"]
     restart: "no"
     environment:
-      RMM_DATABASE_URL: ${RMM_DATABASE_URL}
+      RMM_DATABASE_URL: ${RMM_DATABASE_URL:?set in deploy/.env}
     depends_on:
       timescale:
         condition: service_healthy
@@ -79,7 +79,7 @@ services:
     command: ["api"]
     environment:
       RMM_API_LISTEN: 0.0.0.0:8080
-      RMM_DATABASE_URL: ${RMM_DATABASE_URL}
+      RMM_DATABASE_URL: ${RMM_DATABASE_URL:?set in deploy/.env}
     healthcheck:
       test: ["CMD", "/usr/local/bin/rmm-server", "healthcheck", "http://127.0.0.1:8080/healthz"]
       interval: 5s
@@ -91,9 +91,9 @@ services:
     command: ["ingest"]
     environment:
       RMM_HEALTH_LISTEN: 0.0.0.0:8081
-      RMM_NATS_URL: ${RMM_NATS_URL}
+      RMM_NATS_URL: ${RMM_NATS_URL:?set in deploy/.env}
       RMM_NATS_USER: ingest
-      RMM_NATS_PASSWORD: ${RMM_NATS_INGEST_PASSWORD}
+      RMM_NATS_PASSWORD: ${RMM_NATS_INGEST_PASSWORD:?set in deploy/.env}
     healthcheck:
       test: ["CMD", "/usr/local/bin/rmm-server", "healthcheck", "http://127.0.0.1:8081/healthz"]
       interval: 5s
@@ -105,9 +105,9 @@ services:
     command: ["authd"]
     environment:
       RMM_HEALTH_LISTEN: 0.0.0.0:8082
-      RMM_NATS_URL: ${RMM_NATS_URL}
+      RMM_NATS_URL: ${RMM_NATS_URL:?set in deploy/.env}
       RMM_NATS_USER: authd
-      RMM_NATS_PASSWORD: ${RMM_NATS_AUTHD_PASSWORD}
+      RMM_NATS_PASSWORD: ${RMM_NATS_AUTHD_PASSWORD:?set in deploy/.env}
     healthcheck:
       test: ["CMD", "/usr/local/bin/rmm-server", "healthcheck", "http://127.0.0.1:8082/healthz"]
       interval: 5s

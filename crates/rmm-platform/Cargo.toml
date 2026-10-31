@@ -16,6 +16,9 @@ windows.workspace = true
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true
 
+# Keep in sync with [workspace.lints] in the root Cargo.toml (this crate cannot
+# inherit them because it relaxes unsafe_code). Differences are intentional:
+# unsafe_code = "allow" and undocumented_unsafe_blocks = "deny".
 [lints.rust]
 unsafe_code = "allow"
 missing_debug_implementations = "warn"

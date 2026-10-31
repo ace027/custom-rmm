@@ -33,7 +33,14 @@ for c in rmm-db rmm-api rmm-server; do
 done
 
 for c in rmm-agent rmm-agent-core rmm-watchdog rmm-session; do
-  out=$(cargo tree -p "$c" -e features --target all -i rmm-trust 2>/dev/null || true)
+  if ! out=$(cargo tree -p "$c" -e features --target all -i rmm-trust 2>&1); then
+    if grep -q 'did not match any packages' <<<"$out"; then
+      out=""   # crate does not depend on rmm-trust at all
+    else
+      report FAIL "cargo tree failed for $c: $out"
+      continue
+    fi
+  fi
   if grep -q 'feature "sign"' <<<"$out"; then
     report FAIL "$c enables rmm-trust feature sign"
   else
