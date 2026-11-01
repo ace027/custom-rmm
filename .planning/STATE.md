@@ -1,13 +1,13 @@
 # Project State
 
 ## Current Position
-- **Phase**: 6 of 9 (partial — 1 plan(s) failed)
-- **Status**: Phase 6 partial — 06-01 failed, stopped after wave 1, review needed
+- **Phase**: 6 of 9 (executing)
+- **Status**: Phase 6 executing — Plan 06-01 complete
 - **Last Activity**: Plan 06-01 execution (2026-11-01)
 
 ## Progress
 ```
-[###########.........] 56% — 17/30 plans complete
+[############........] 60% — 18/30 plans complete
 ```
 
 ## Recent Decisions
@@ -74,3 +74,4 @@ Fix the failed plans and run `/triad:build` again (completed plans are kept), or
 ## Phase 6 Results
 (build started 2026-11-01)
 - Plan 06-01 (Wave 1): Recipe schema, validator, fixtures and phase dependencies — PARTIAL: none
+- Plan 06-01 (Wave 1): Recipe schema, validator, fixtures and phase dependencies — Complete
