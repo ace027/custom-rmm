@@ -1,0 +1,160 @@
+name: rmm
+
+secrets:
+  extra_ca:
+    file: ${RMM_EXTRA_CA_FILE:-./dev/empty-ca.pem}
+
+volumes:
+  pgdata:
+  natsdata:
+
+x-server: &server
+  image: rmm-server:dev
+  pull_policy: never
+  restart: unless-stopped
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    nats:
+      condition: service_healthy
+
+services:
+  timescale:
+    image: timescale/timescaledb:latest-pg17
+    environment:
+      POSTGRES_DB: rmm
+      POSTGRES_USER: rmm
+      POSTGRES_PASSWORD: ${RMM_PG_PASSWORD:?set in deploy/.env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      # Probe over TCP: during first-run init the image runs a temporary server
+      # on the Unix socket only, and it restarts afterwards; a socket probe
+      # would report healthy then and let migrate race the init scripts.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U rmm -d rmm"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  nats:
+    image: nats:2.11-alpine
+    command: ["-c", "/etc/nats/nats.conf"]
+    environment:
+      RMM_NATS_API_PASSWORD: ${RMM_NATS_API_PASSWORD:?set in deploy/.env}
+      RMM_NATS_INGEST_PASSWORD: ${RMM_NATS_INGEST_PASSWORD:?set in deploy/.env}
+      RMM_NATS_AUTHD_PASSWORD: ${RMM_NATS_AUTHD_PASSWORD:?set in deploy/.env}
+      RMM_NATS_SYS_PASSWORD: ${RMM_NATS_SYS_PASSWORD:?set in deploy/.env}
+      # Auth callout issuer; scripts/dev-up.sh generates it into deploy/.env.
+      RMM_AUTHD_ISSUER_PUBKEY: ${RMM_AUTHD_ISSUER_PUBKEY:-}
+    volumes:
+      - ./nats/nats.conf:/etc/nats/nats.conf:ro
+      - natsdata:/data
+    ports:
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- 'http://127.0.0.1:8222/healthz?js-enabled-only=true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    image: rmm-server:dev
+    pull_policy: never
+    build:
+      context: ..
+      dockerfile: deploy/server.Dockerfile
+      network: host
+      args:
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        https_proxy: ${HTTPS_PROXY:-}
+      secrets: [extra_ca]
+    command: ["migrate"]
+    restart: "no"
+    environment:
+      RMM_DATABASE_URL: ${RMM_DATABASE_URL:?set in deploy/.env}
+    depends_on:
+      timescale:
+        condition: service_healthy
+
+  api:
+    <<: *server
+    command: ["api"]
+    environment:
+      RMM_API_LISTEN: 0.0.0.0:8080
+      RMM_DATABASE_URL: ${RMM_DATABASE_URL:?set in deploy/.env}
+      RMM_NATS_URL: ${RMM_NATS_URL:?set in deploy/.env}
+      RMM_NATS_USER: api
+      RMM_NATS_PASSWORD: ${RMM_NATS_API_PASSWORD:?set in deploy/.env}
+      RMM_NATS_PUBLIC_URL: wss://localhost:${RMM_HTTPS_PORT:-443}/nats
+      RMM_ROOT_PUBKEYS: ${RMM_ROOT_PUBKEYS:-}
+      RMM_ROOT_THRESHOLD: ${RMM_ROOT_THRESHOLD:-1}
+      RMM_ENTRA_TENANT_ID: ${RMM_ENTRA_TENANT_ID:-}
+      RMM_ENTRA_AUDIENCE: api://rmm-dev
+      # Dev issuer for `rmm-server dev-token`; never enable outside dev.
+      RMM_AUTH_ALLOW_DEV: "1"
+      RMM_AUTH_DEV_PUBKEY_FILE: /run/rmm-auth/dev-pub.pem
+      RMM_AUTH_DEV_KEY_FILE: /run/rmm-auth/dev-key.pem
+    volumes:
+      - ./dev/auth:/run/rmm-auth:ro
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/rmm-server", "healthcheck", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  ingest:
+    <<: *server
+    command: ["ingest"]
+    environment:
+      RMM_HEALTH_LISTEN: 0.0.0.0:8081
+      RMM_NATS_URL: ${RMM_NATS_URL:?set in deploy/.env}
+      RMM_NATS_USER: ingest
+      RMM_NATS_PASSWORD: ${RMM_NATS_INGEST_PASSWORD:?set in deploy/.env}
+      RMM_DATABASE_URL: ${RMM_DATABASE_URL:?set in deploy/.env}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/rmm-server", "healthcheck", "http://127.0.0.1:8081/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  authd:
+    <<: *server
+    command: ["authd"]
+    environment:
+      RMM_HEALTH_LISTEN: 0.0.0.0:8082
+      RMM_NATS_URL: ${RMM_NATS_URL:?set in deploy/.env}
+      RMM_NATS_USER: authd
+      RMM_NATS_PASSWORD: ${RMM_NATS_AUTHD_PASSWORD:?set in deploy/.env}
+      RMM_NATS_SYS_USER: sys
+      RMM_NATS_SYS_PASSWORD: ${RMM_NATS_SYS_PASSWORD:?set in deploy/.env}
+      RMM_AUTHD_ISSUER_SEED: ${RMM_AUTHD_ISSUER_SEED:-}
+      RMM_DATABASE_URL: ${RMM_DATABASE_URL:?set in deploy/.env}
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/rmm-server", "healthcheck", "http://127.0.0.1:8082/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "${RMM_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./dev/certs:/etc/nginx/certs:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-check-certificate -qO- https://127.0.0.1/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 20

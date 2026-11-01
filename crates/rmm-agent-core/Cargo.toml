@@ -1,0 +1,29 @@
+[package]
+name = "rmm-agent-core"
+description = "Platform-agnostic agent core"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+version.workspace = true
+
+[dependencies]
+rmm-proto.workspace = true
+rmm-trust.workspace = true
+rmm-recipe.workspace = true
+rmm-platform.workspace = true
+reqwest.workspace = true
+nkeys.workspace = true
+uuid.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+async-nats.workspace = true
+rand.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+ciborium.workspace = true
+ed25519-dalek.workspace = true
+
+[lints]
+workspace = true

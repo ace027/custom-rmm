@@ -1,0 +1,9 @@
+target/
+/target
+deploy/dev/
+deploy/.env
+*.pem
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/

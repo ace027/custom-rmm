@@ -1,0 +1,20 @@
+[package]
+name = "rmm-agent"
+description = "Endpoint agent binary"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+version.workspace = true
+
+[dependencies]
+rmm-agent-core.workspace = true
+rmm-platform.workspace = true
+clap.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update tenant.enrollment_token\n             set uses = uses + 1\n           where token_hash = $1 and uses < max_uses and not revoked and expires_at > now()\n           returning id, client_id, site_id, uses, max_uses, allow_reattach",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "client_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "site_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "uses",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "max_uses",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "allow_reattach",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "963ec38da1c2348a21af9d7a18709fc7557745ceeb75a589d660a334537f9e02"
+}

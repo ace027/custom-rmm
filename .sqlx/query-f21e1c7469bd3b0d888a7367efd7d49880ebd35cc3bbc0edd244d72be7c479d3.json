@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into tenant.device_event (client_id, device_id, at, type, before, after) values ($1, $2, $3, 'inventory.changed', $4, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Jsonb",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f21e1c7469bd3b0d888a7367efd7d49880ebd35cc3bbc0edd244d72be7c479d3"
+}

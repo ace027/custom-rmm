@@ -1,0 +1,45 @@
+[graph]
+all-features = true
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CDLA-Permissive-2.0",
+    "MPL-2.0",
+]
+
+[licenses.private]
+# Workspace crates are UNLICENSED and publish = false.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+deny = [
+    { crate = "openssl" },
+    { crate = "openssl-sys" },
+    { crate = "native-tls" },
+]
+
+[advisories]
+# Both advisories reach the build only through `age` 0.12, which only rmm-sign
+# (the offline signing CLI) uses; scripts/check-layering.sh keeps `age` out of
+# the agent. Remove these when an `age` release drops the affected versions.
+ignore = [
+    # i18n-config (age's localisation dependency): no fixed version available.
+    { id = "RUSTSEC-2026-0374", reason = "rmm-sign only (offline CLI), via age" },
+    # crypto-bigint 0.5.5 constant-time issues, reached through age's mandatory
+    # P-256 dependency. rmm-sign uses only age's scrypt passphrase recipient,
+    # which never runs P-256 arithmetic.
+    { id = "RUSTSEC-2026-0387", reason = "rmm-sign only (offline CLI); P-256 path unused" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

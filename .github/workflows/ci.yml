@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  SQLX_OFFLINE: "true"
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PC/SC headers (rmm-sign card backend)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpcsclite-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo deny check
+      - run: scripts/check-layering.sh
+      - run: scripts/test-layering.sh
+      - run: cargo run -q -p xtask -- openapi --check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openapi
+          path: docs/openapi.json
+
+  windows-cross:
+    runs-on: ubuntu-24.04
+    env:
+      XWIN_ACCEPT_LICENSE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      # cargo-xwin drives clang-cl, lld-link and llvm-lib; the runner lacks llvm-lib.
+      - name: Install PC/SC headers and LLVM tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpcsclite-dev pkg-config clang lld llvm
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-xwin
+      - name: Read cargo-xwin version
+        id: xwin
+        run: echo "version=$(cargo xwin --version | awk '{print $NF}')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/cargo-xwin
+          key: cargo-xwin-${{ steps.xwin.outputs.version }}-${{ hashFiles('rust-toolchain.toml') }}-xwin-v1
+      - name: Clippy (x86_64 Windows)
+        run: >-
+          cargo xwin clippy --target x86_64-pc-windows-msvc
+          -p rmm-proto -p rmm-trust -p rmm-recipe -p rmm-platform -p rmm-agent-core
+          -p rmm-agent -p rmm-watchdog -p rmm-session -p rmm-sign
+          --all-targets --locked -- -D warnings
+      # rmm-agent is built in its own invocation so that the `sign` feature
+      # enabled by rmm-sign is not unified into it.
+      - name: Build rmm-agent alone (x86_64 Windows)
+        run: cargo xwin build --target x86_64-pc-windows-msvc -p rmm-agent --locked
+      - name: Build other crates (x86_64 Windows)
+        run: >-
+          cargo xwin build --target x86_64-pc-windows-msvc
+          -p rmm-watchdog -p rmm-session -p rmm-sign --locked
+      - name: Agent contains no signing code
+        run: scripts/check-agent-no-sign.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rmm-agent-windows-x64
+          path: target/x86_64-pc-windows-msvc/debug/rmm-agent.exe
+
+  test-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PC/SC headers (rmm-sign card backend)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpcsclite-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: sqlx-cli
+      - name: Dev-stack smoke test
+        env:
+          RMM_HTTPS_PORT: "8443"
+        run: scripts/smoke-dev.sh
+      # Database-backed tests (#[sqlx::test]) need the stack started above.
+      - name: Tests
+        run: |
+          pw=$(sed -n 's/^RMM_PG_PASSWORD=//p' deploy/.env.example)
+          export DATABASE_URL="postgres://rmm:${pw}@localhost:5432/rmm"
+          cargo test --workspace --locked
+      - name: End-to-end enrollment (agent, authd callout, revocation, reattach)
+        env:
+          RMM_HTTPS_PORT: "8443"
+        run: scripts/e2e-enroll.sh
+      - name: End-to-end telemetry (heartbeat, inventory, metrics, scoping, throughput)
+        env:
+          RMM_HTTPS_PORT: "8443"
+        run: scripts/e2e-telemetry.sh
+      - name: sqlx offline data is current
+        env:
+          SQLX_OFFLINE: "false"
+        run: |
+          pw=$(sed -n 's/^RMM_PG_PASSWORD=//p' deploy/.env.example)
+          export DATABASE_URL="postgres://rmm:${pw}@localhost:5432/rmm"
+          cargo sqlx prepare --workspace --check
+      - name: Compose logs
+        if: failure()
+        run: |
+          [ -f deploy/.env ] || cp deploy/.env.example deploy/.env
+          docker compose -f deploy/compose.yaml logs --no-color
+      - name: Tear down stack
+        if: always()
+        run: |
+          [ -f deploy/.env ] || cp deploy/.env.example deploy/.env
+          docker compose -f deploy/compose.yaml down -v
+
+  test-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked -p rmm-proto -p rmm-trust -p rmm-recipe -p rmm-platform -p rmm-agent-core -p rmm-agent -p rmm-watchdog -p rmm-session
+      - run: cargo build --locked -p rmm-agent
+      - run: cargo build --locked -p rmm-sign
+      # ARM64 is checked natively: cargo-xwin's flags break ring's and
+      # aws-lc-sys's aarch64 assembly builds when cross-compiling from Linux.
+      - name: Check (aarch64 Windows)
+        run: |
+          rustup target add aarch64-pc-windows-msvc
+          cargo check --locked --target aarch64-pc-windows-msvc -p rmm-agent -p rmm-watchdog

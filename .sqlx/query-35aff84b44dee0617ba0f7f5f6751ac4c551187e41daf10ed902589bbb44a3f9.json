@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into tenant.enrollment_token\n             (client_id, site_id, token_hash, expires_at, max_uses, allow_reattach, created_by)\n           values ($1, $2, $3, $4, $5, $6, $7) returning id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bytea",
+        "Timestamptz",
+        "Int4",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "35aff84b44dee0617ba0f7f5f6751ac4c551187e41daf10ed902589bbb44a3f9"
+}

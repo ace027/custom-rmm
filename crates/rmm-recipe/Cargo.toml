@@ -1,0 +1,15 @@
+[package]
+name = "rmm-recipe"
+description = "Action-definition schema and static recipe validation"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+version.workspace = true
+
+[dependencies]
+rmm-proto.workspace = true
+rmm-trust.workspace = true
+
+[lints]
+workspace = true

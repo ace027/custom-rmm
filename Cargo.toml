@@ -1,0 +1,84 @@
+[workspace]
+members = ["crates/*", "xtask"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.97"
+license = "UNLICENSED"
+publish = false
+version = "0.1.0"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "io-util"] }
+futures-util = "0.3"
+async-nats = { version = "0.51", default-features = false, features = ["websockets", "ring", "server_2_11", "nkeys", "jetstream"] }
+axum = "0.8"
+utoipa = { version = "5", features = ["axum_extras"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+clap = { version = "4", features = ["derive"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "migrate", "uuid", "chrono"] }
+rustix = { version = "1", features = ["system"] }
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Memory",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+] }
+tower = { version = "0.5", features = ["util"] }
+ciborium = "0.2"
+sha2 = "0.11"
+ed25519-dalek = { version = "3", default-features = false, features = ["zeroize"] }
+rand_core = "0.10"
+p256 = { version = "0.14", default-features = false, features = ["ecdsa"] }
+hex = "0.4"
+proptest = "1"
+age = "0.12"
+similar = "3"
+rpassword = "7"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+nkeys = "0.4"
+jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs"] }
+data-encoding = "2"
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+rand = "0.10"
+sysinfo = { version = "0.40", default-features = false, features = ["system", "disk"] }
+tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
+zeroize = "1"
+openpgp-card = "0.7"
+card-backend-pcsc = "0.5"
+
+rmm-proto = { path = "crates/rmm-proto" }
+rmm-trust = { path = "crates/rmm-trust" }
+rmm-recipe = { path = "crates/rmm-recipe" }
+rmm-platform = { path = "crates/rmm-platform" }
+rmm-agent-core = { path = "crates/rmm-agent-core" }
+rmm-db = { path = "crates/rmm-db" }
+rmm-api = { path = "crates/rmm-api" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "deny"
+unwrap_used = "warn"
+print_stdout = "allow"
+
+# Debug-mode curve arithmetic is very slow; optimize crypto crates so the
+# exhaustive bit-flip vector tests stay fast.
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+[profile.dev.package.ed25519-dalek]
+opt-level = 3

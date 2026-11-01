@@ -1,0 +1,27 @@
+[package]
+name = "rmm-trust"
+description = "Trust-chain verification (and, behind the sign feature, signing)"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+version.workspace = true
+
+[features]
+default = []
+sign = ["ed25519-dalek/rand_core", "dep:rand_core"]
+
+[dependencies]
+rmm-proto.workspace = true
+serde.workspace = true
+ciborium.workspace = true
+sha2.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+serde_json.workspace = true
+p256.workspace = true
+ed25519-dalek.workspace = true
+rand_core = { workspace = true, optional = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update tenant.agent set last_seen = now() where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1f8c30ec8e1ffa51e448ad38475a7bcd007bd60989dadd6191dd55cfe7f4652e"
+}

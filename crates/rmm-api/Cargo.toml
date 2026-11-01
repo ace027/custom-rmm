@@ -1,0 +1,36 @@
+[package]
+name = "rmm-api"
+description = "HTTP API routes and OpenAPI document"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+version.workspace = true
+
+[dependencies]
+axum.workspace = true
+utoipa.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+jsonwebtoken.workspace = true
+data-encoding.workspace = true
+uuid.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+async-nats.workspace = true
+rmm-db.workspace = true
+rmm-trust.workspace = true
+rmm-proto.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+sha2.workspace = true
+ed25519-dalek.workspace = true
+nkeys.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+tower.workspace = true
+
+[lints]
+workspace = true
