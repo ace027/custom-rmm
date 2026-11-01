@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update tenant.device set os_version = $2, cpu_model = $3, cpu_cores = $4, ram_bytes = $5, disk_total_bytes = $6, disk_free_bytes = $7, last_boot = $8, inventory = $9, inventory_hash = $10, inventory_at = $11 where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Int4",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Timestamptz",
+        "Jsonb",
+        "Bytea",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a1d905460892ce9a5f2cde37dd05b8593419300bca0112077e213f06977123c4"
+}

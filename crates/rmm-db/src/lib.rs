@@ -2,6 +2,7 @@
 
 pub mod repo;
 pub mod scope;
+pub mod telemetry;
 
 use std::time::{Duration, Instant};
 

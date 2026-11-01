@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id, client_id, device_id, at, type as \"type!\", before, after\n           from tenant.device_event where device_id = $1 order by at desc, id desc limit $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "client_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "device_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "before",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "after",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "d8c1905dfc3b5aa4d56a2e9a5e2033271a30c7ef4455ec0fe7791b17ddc78032"
+}

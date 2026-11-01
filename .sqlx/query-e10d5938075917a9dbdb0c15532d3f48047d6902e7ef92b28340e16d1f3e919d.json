@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select os_version, cpu_model, cpu_cores, ram_bytes, disk_total_bytes, disk_free_bytes, last_boot, inventory_hash from tenant.device where id = $1 and client_id = $2 for update",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "os_version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "cpu_model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "cpu_cores",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "ram_bytes",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "disk_total_bytes",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "disk_free_bytes",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "last_boot",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "inventory_hash",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "e10d5938075917a9dbdb0c15532d3f48047d6902e7ef92b28340e16d1f3e919d"
+}

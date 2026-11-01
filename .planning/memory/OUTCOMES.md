@@ -37,3 +37,4 @@ Managed by memory-manager skill. Do not edit manually unless pruning old records
 | O-028 | 2026-10-31 | claude/rmm-backend-explore-plan-6pu4ue | 3 | 03-00 | testing-qa-verification-specialist | quality-review | success | 2 | review, testing | Phase 3 review PASSED in 1 cycle(s), 0 finding(s) |
 | O-029 | 2026-10-31 | claude/rmm-backend-explore-plan-6pu4ue | 3 | 03-00 | engineering-senior-developer | quality-review | success | 3 | review, engineering | Phase 3 review PASSED in 1 cycle(s), 0 finding(s) |
 | O-030 | 2026-10-31 | claude/rmm-backend-explore-plan-6pu4ue | 3 | 03-00 | engineering-backend-architect | quality-review | success | 3 | review, engineering | Phase 3 review PASSED in 1 cycle(s), 0 finding(s) |
+| O-031 | 2026-11-01 | claude/rmm-backend-explore-plan-6pu4ue | 4 | 04-01 | engineering-backend-architect | implementation | success | 2 | heartbeat-inventory-and-metrics, engineering | Telemetry schema, roles, RLS and repositories: Complete |
