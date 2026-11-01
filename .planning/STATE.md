@@ -1,9 +1,9 @@
 # Project State
 
 ## Current Position
-- **Phase**: 8 of 9 (executed, pending review)
-- **Status**: Phase 8 complete — all plans executed successfully
-- **Last Activity**: Plan 08-03 execution (2026-11-01)
+- **Phase**: 8 of 9 (complete)
+- **Status**: Phase 8 complete — review passed (1 cycle(s))
+- **Last Activity**: Phase 8 review (2026-11-01)
 
 ## Progress
 ```
@@ -29,7 +29,7 @@
 - rmm-sign extended (user-approved quick task): `definition` doc type (validated with rmm-recipe, catalog role) and `keygen-command` for the online server command key (0600 seed file; no seed export for root, catalog or card keys)
 
 ## Next Action
-Run `/triad:review` to verify Phase 8: Watchdog and A/B updater
+Run `/triad:plan 9` to plan Phase 9: MSI packaging
 
 ## Phase 1 Results
 (build started 2026-10-31)

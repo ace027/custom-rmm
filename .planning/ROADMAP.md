@@ -9,7 +9,7 @@
 - [x] Phase 5: Encrypted local store and offline sync (2 plans)
 - [x] Phase 6: Signed commands and first catalog action (4 plans)
 - [x] Phase 7: Co-signed remote shell (4 plans)
-- [ ] Phase 8: Watchdog and A/B updater (3 plans)
+- [x] Phase 8: Watchdog and A/B updater (3 plans)
 - [ ] Phase 9: MSI packaging (2 plans)
 
 ## Phase Details
@@ -127,5 +127,5 @@
 | 5 | 2 | 2 | Complete |
 | 6 | 4 | 4 | Complete |
 | 7 | 4 | 4 | Complete |
-| 8 | 3 | 3 | Executed |
+| 8 | 3 | 3 | Complete |
 | 9 | 2 | 0 | Pending |
