@@ -139,6 +139,9 @@ impl fmt::Debug for Store {
     }
 }
 
+/// A pending inbox row: its id and the opened envelope (or why it failed).
+pub type InboxRow = (Vec<u8>, Result<Vec<u8>>);
+
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -494,6 +497,15 @@ impl Store {
 
     /// The oldest pending `(cmd_id, envelope)`.
     pub fn inbox_next_pending(&self) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
+        self.inbox_next_pending_row()?
+            .map(|(id, env)| env.map(|e| (id, e)))
+            .transpose()
+    }
+
+    /// Like [`Store::inbox_next_pending`], but a row that cannot be opened
+    /// (AEAD failure, corrupt blob) is returned with its error instead of
+    /// failing the call, so the caller can retire it.
+    pub fn inbox_next_pending_row(&self) -> Result<Option<InboxRow>> {
         let row: Option<(Vec<u8>, Vec<u8>)> = self
             .lock()
             .query_row(
@@ -503,11 +515,10 @@ impl Store {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
-        row.map(|(id, blob)| {
-            let env = open(&self.key, "inbox", &id, &blob)?;
-            Ok((id, env))
-        })
-        .transpose()
+        Ok(row.map(|(id, blob)| {
+            let env = open(&self.key, "inbox", &id, &blob);
+            (id, env)
+        }))
     }
 
     /// Mark a command as finished; a missing row is fine.

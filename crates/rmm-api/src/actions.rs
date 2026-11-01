@@ -426,8 +426,7 @@ pub async fn issue_command(
         }),
     )
     .await?;
-    tx.commit().await?;
-
+    // Publish before committing so a failed publish leaves no orphan `queued` run.
     if let Some(js) = &js {
         let mut headers = async_nats::HeaderMap::new();
         headers.insert(async_nats::header::NATS_MESSAGE_ID, cmd_id.to_string());
@@ -438,12 +437,15 @@ pub async fn issue_command(
         }
         .await;
         if let Err(err) = published {
-            tracing::error!(%err, %cmd_id, %agent_id, "command recorded but not published");
+            // Dropping `tx` rolls the run back: no row is left `queued` for a
+            // command that was never published.
+            tracing::error!(%err, %cmd_id, %agent_id, "command not published; run rolled back");
             return Err(ApiError::Unavailable(
-                "command recorded but could not be published".into(),
+                "command could not be published".into(),
             ));
         }
     }
+    tx.commit().await?;
     Ok(Issued { cmd_id, command })
 }
 
@@ -517,9 +519,19 @@ pub async fn read_run(
         .await?
         .ok_or_else(|| ApiError::NotFound("unknown action run".into()))?;
     let rfc = |t: DateTime<Utc>| t.to_rfc3339();
+    // A run still `queued` past its command TTL can no longer be executed (the
+    // agent rejects expired commands), so report it as `expired`.
+    let ttl = i64::try_from(COMMAND_TTL_SECS).unwrap_or(i64::MAX);
+    let status = if run.status == "queued"
+        && Utc::now().timestamp() > run.created_at.timestamp().saturating_add(ttl)
+    {
+        "expired".to_owned()
+    } else {
+        run.status
+    };
     Ok(ActionRunResponse {
         cmd_id: run.cmd_id,
-        status: run.status,
+        status,
         reason: run.reason,
         stages: run.stages,
         created_at: rfc(run.created_at),

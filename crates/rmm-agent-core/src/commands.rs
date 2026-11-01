@@ -457,8 +457,24 @@ pub fn process_pending(
     clock: &dyn Clock,
 ) -> Result<usize, StoreError> {
     let mut n = 0;
-    while let Some((cmd_id, env)) = store.inbox_next_pending()? {
-        let result = handle(&env, agent, store, blocks, clock);
+    while let Some((cmd_id, env)) = store.inbox_next_pending_row()? {
+        let result = match env {
+            Ok(env) => handle(&env, agent, store, blocks, clock),
+            Err(e) => {
+                // Poison row: retire it with a rejection so the rows behind
+                // it still run.
+                tracing::error!(
+                    cmd_id = %crate::blocks::hex(&cmd_id),
+                    "inbox row unreadable: {e}"
+                );
+                let id = if cmd_id.len() == 16 {
+                    cmd_id.clone()
+                } else {
+                    Sha256::digest(&cmd_id)[..16].to_vec()
+                };
+                executor::rejected(id, &agent.agent_id, [0; 32], RejectReason::Validation)
+            }
+        };
         tracing::info!(
             cmd_id = %crate::blocks::hex(&cmd_id),
             outcome = ?result.outcome,

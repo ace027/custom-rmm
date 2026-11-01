@@ -383,6 +383,36 @@ fn pending_command_survives_restart() {
 }
 
 #[test]
+fn corrupt_inbox_row_does_not_block_later_commands() {
+    let tmp = TempDir::new();
+    let store = enrolled_store(tmp.path());
+    let blocks = Recorder::default();
+    let bad_id = [7u8; 16];
+    store.inbox_put(&bad_id, b"garbage").expect("put bad");
+    {
+        let conn = rusqlite::Connection::open(tmp.path().join(rmm_agent_core::store::DB_FILE))
+            .expect("open db");
+        conn.execute(
+            "UPDATE inbox SET envelope = x'00112233', received_at = 1 WHERE cmd_id = ?1",
+            [&bad_id[..]],
+        )
+        .expect("corrupt");
+    }
+    accept(&store, &fixture("cmd-valid.env")).expect("accept");
+
+    let n = process_pending(&store, &agent(), &blocks, &FixedClock(NOW)).expect("process");
+    assert_eq!(n, 2);
+    assert_eq!(store.inbox_pending_len().expect("pending"), 0);
+    assert!(!blocks.calls().is_empty(), "the valid command still runs");
+    let results = queued_results(&store);
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].outcome, Outcome::Rejected);
+    assert_eq!(results[0].reason, Some(RejectReason::Validation));
+    assert_eq!(results[0].cmd_id.0, bad_id.to_vec());
+    assert_eq!(results[1].outcome, Outcome::Succeeded);
+}
+
+#[test]
 fn handle_reports_definition_and_command_ids() {
     let tmp = TempDir::new();
     let store = enrolled_store(tmp.path());
