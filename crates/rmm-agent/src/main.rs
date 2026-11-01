@@ -9,9 +9,11 @@ use rmm_agent_core::blocks::PlatformBlocks;
 use rmm_agent_core::commands::{self, Agent, IntakeOptions};
 use rmm_agent_core::enroll::{self, EnrollError, EnrollOptions};
 use rmm_agent_core::identity;
+use rmm_agent_core::shell::{Indicator, SessionConfig, ShellLink, ShellManager};
 use rmm_agent_core::store::{STORE_KEY_FILE, Store};
 use rmm_agent_core::telemetry::{self as agent_telemetry, CancellationToken, Intervals};
 use rmm_agent_core::transport::{self, ConnState};
+use rmm_platform::indicator::IndicatorServer;
 use tokio::sync::Notify;
 
 const EXIT_FAILURE: u8 = 1;
@@ -181,13 +183,16 @@ async fn run(state_dir: Option<PathBuf>, once: bool) -> u8 {
     let intake_task = store.clone().zip(agent).map(|(store, agent)| {
         let client = client.clone();
         let ident = ident.clone();
+        let shell = shell_manager(&agent.agent_id, &client);
         let opts = IntakeOptions {
             agent,
             blocks: Arc::new(PlatformBlocks::for_agent(&dir)),
             outbox_wake: Arc::clone(&reconnect),
             shutdown: shutdown.clone(),
         };
-        tokio::spawn(async move { commands::intake(client, &ident, store, opts).await })
+        tokio::spawn(async move {
+            commands::intake_with(client, &ident, store, opts, Some(shell)).await;
+        })
     });
     let telemetry_task = store.map(|store| {
         let client = client.clone();
@@ -241,6 +246,24 @@ async fn run(state_dir: Option<PathBuf>, once: bool) -> u8 {
         let _ = task.await;
     }
     code
+}
+
+/// The shell session manager over the agent's NATS connection, with the
+/// session indicator (socket from `RMM_INDICATOR_SOCKET` or the platform
+/// default). Shells still run when the indicator cannot start.
+fn shell_manager<L: ShellLink + Clone + 'static>(agent_id: &str, client: &L) -> ShellManager {
+    let indicator: Option<Arc<dyn Indicator>> = match IndicatorServer::start(None) {
+        Ok(s) => {
+            tracing::info!(path = ?s.path(), "session indicator listening");
+            Some(Arc::new(s))
+        }
+        Err(e) => {
+            tracing::warn!("session indicator unavailable: {e}");
+            None
+        }
+    };
+    let link: Arc<dyn ShellLink> = Arc::new(client.clone());
+    ShellManager::new(agent_id, link, indicator, SessionConfig::default())
 }
 
 #[tokio::main]

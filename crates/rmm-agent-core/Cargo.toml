@@ -19,6 +19,7 @@ serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 async-nats.workspace = true
+futures-util.workspace = true
 rand.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true

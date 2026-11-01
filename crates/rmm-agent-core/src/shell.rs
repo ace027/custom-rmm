@@ -228,6 +228,76 @@ impl ShellLink for MemoryLink {
     }
 }
 
+/// Largest inbound `.in` / `.ctl` payload forwarded to a session. Valid
+/// messages carry at most `MAX_CHUNK` data bytes plus a small CBOR header;
+/// anything bigger is dropped before it is queued, so the inbound queues
+/// stay bounded at `INBOUND_QUEUE * MAX_INBOUND` bytes.
+pub const MAX_INBOUND: usize = MAX_CHUNK + 256;
+
+/// Forward a core NATS subscription into an [`Inbound`] queue until either
+/// side ends. Dropping the receiver drops the subscriber, which unsubscribes.
+async fn nats_subscribe(client: &async_nats::Client, subject: String) -> Result<Inbound, LinkError> {
+    use futures_util::StreamExt as _;
+
+    let mut sub = client
+        .subscribe(subject.clone())
+        .await
+        .map_err(|e| LinkError(format!("subscribe {subject}: {e}")))?;
+    // Make sure the server has the subscription before the session reports
+    // ready, so the relay's first messages are not lost.
+    client
+        .flush()
+        .await
+        .map_err(|e| LinkError(format!("flush {subject}: {e}")))?;
+    let (tx, rx) = mpsc::channel(INBOUND_QUEUE);
+    tokio::spawn(async move {
+        loop {
+            let msg = tokio::select! {
+                () = tx.closed() => break,
+                m = sub.next() => match m {
+                    Some(m) => m,
+                    None => break,
+                },
+            };
+            if msg.payload.len() > MAX_INBOUND {
+                tracing::debug!(%subject, len = msg.payload.len(), "oversized shell message dropped");
+                continue;
+            }
+            if tx.send(msg.payload.to_vec()).await.is_err() {
+                break;
+            }
+        }
+        // Dropping `sub` unsubscribes.
+    });
+    Ok(rx)
+}
+
+impl ShellLink for async_nats::Client {
+    fn publish_out<'a>(
+        &'a self,
+        agent_id: &'a str,
+        sid: &'a str,
+        msg: ShellOut,
+    ) -> LinkFuture<'a, ()> {
+        Box::pin(async move {
+            let bytes = msg
+                .to_cbor()
+                .map_err(|e| LinkError(format!("encode: {e}")))?;
+            self.publish(rmm_proto::subjects::shell_out(agent_id, sid), bytes.into())
+                .await
+                .map_err(|e| LinkError(format!("publish: {e}")))
+        })
+    }
+
+    fn subscribe_in<'a>(&'a self, agent_id: &'a str, sid: &'a str) -> LinkFuture<'a, Inbound> {
+        Box::pin(nats_subscribe(self, rmm_proto::subjects::shell_in(agent_id, sid)))
+    }
+
+    fn subscribe_ctl<'a>(&'a self, agent_id: &'a str, sid: &'a str) -> LinkFuture<'a, Inbound> {
+        Box::pin(nats_subscribe(self, rmm_proto::subjects::shell_ctl(agent_id, sid)))
+    }
+}
+
 /// Receives the "IT is connected" state.
 pub trait Indicator: Send + Sync {
     /// Show `state`.
