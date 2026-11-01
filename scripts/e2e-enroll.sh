@@ -34,7 +34,7 @@ pass() { echo "PASS $*"; }
 
 scripts/dev-up.sh
 
-cargo build -q --locked -p rmm-agent
+RMM_ROOT_PUBKEYS=$(sed -n 's/^RMM_ROOT_PUBKEYS=//p' deploy/.env) cargo build -q --locked -p rmm-agent
 AGENT=$ROOT/target/debug/rmm-agent
 
 # Fake DMI for simulated machines: each gets its own strong fingerprint.

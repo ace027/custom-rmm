@@ -239,3 +239,16 @@ publish and subscribe (via `natsio/nats-box` with the agent's seed from
 clone flagging. It runs the agent as root in a private mount namespace with a
 fake `/sys/class/dmi`, so it needs root or passwordless sudo. It leaves the
 stack running.
+
+## Dev trust chain
+
+`scripts/dev-trust.sh` (run by `dev-up.sh`) uses `rmm-sign` with throwaway keys
+(passphrase `dev-only`) to create `deploy/dev/trust/`: `root.age`,
+`catalog.age`, `command.seed` (the API's online command key, mounted read-only
+at `/run/rmm-trust`), a root-signed `manifest.env` (capability ceiling
+`service`, `files.write`), an empty `revocations.env` (45-day expiry) and the
+signed `printing.spooler-restart.env`. It is idempotent; `--force` re-signs.
+`dev-up.sh` writes `RMM_ROOT_PUBKEYS` into `deploy/.env` and uploads the
+documents through the API. Agents for the e2e scripts are built with that
+`RMM_ROOT_PUBKEYS`. `scripts/e2e-actions.sh` proves success, rollback,
+revocation and forged-result handling.

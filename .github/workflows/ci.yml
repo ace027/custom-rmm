@@ -111,6 +111,10 @@ jobs:
         env:
           RMM_HTTPS_PORT: "8443"
         run: scripts/e2e-offline.sh
+      - name: End-to-end signed actions (spooler success, rollback, revocation, forged result)
+        env:
+          RMM_HTTPS_PORT: "8443"
+        run: scripts/e2e-actions.sh
       - name: sqlx offline data is current
         env:
           SQLX_OFFLINE: "false"
@@ -135,6 +139,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --locked -p rmm-proto -p rmm-trust -p rmm-recipe -p rmm-platform -p rmm-agent-core -p rmm-agent -p rmm-watchdog -p rmm-session
+      - name: Real Spooler through the SCM blocks (must not skip)
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --locked -p rmm-platform --test windows_spooler -- --nocapture 2>&1 | tee spooler.log
+          if grep -qi skipping spooler.log; then echo "windows_spooler test skipped" >&2; exit 1; fi
       - run: cargo build --locked -p rmm-agent
       - run: cargo build --locked -p rmm-sign
       # ARM64 is checked natively: cargo-xwin's flags break ring's and

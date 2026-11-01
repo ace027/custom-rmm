@@ -91,6 +91,8 @@ services:
       RMM_NATS_PUBLIC_URL: wss://localhost:${RMM_HTTPS_PORT:-443}/nats
       RMM_ROOT_PUBKEYS: ${RMM_ROOT_PUBKEYS:-}
       RMM_ROOT_THRESHOLD: ${RMM_ROOT_THRESHOLD:-1}
+      # Online command key; scripts/dev-trust.sh creates it.
+      RMM_COMMAND_KEY_FILE: /run/rmm-trust/command.seed
       RMM_ENTRA_TENANT_ID: ${RMM_ENTRA_TENANT_ID:-}
       RMM_ENTRA_AUDIENCE: api://rmm-dev
       # Dev issuer for `rmm-server dev-token`; never enable outside dev.
@@ -99,6 +101,7 @@ services:
       RMM_AUTH_DEV_KEY_FILE: /run/rmm-auth/dev-key.pem
     volumes:
       - ./dev/auth:/run/rmm-auth:ro
+      - ./dev/trust:/run/rmm-trust:ro
     healthcheck:
       test: ["CMD", "/usr/local/bin/rmm-server", "healthcheck", "http://127.0.0.1:8080/healthz"]
       interval: 5s
