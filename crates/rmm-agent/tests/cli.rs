@@ -86,6 +86,17 @@ fn enrolled_without_flag_exits_two() {
 }
 
 #[test]
+fn unreachable_server_fails_with_agent_error_and_no_identity() {
+    let dir = tempdir::Dir::new();
+    let out = agent(dir.path(), &["--token", "rmmenr_secret"], None);
+    assert_eq!(out.status.code(), Some(4), "{out:?}");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("server unreachable"), "{stderr}");
+    assert!(!stderr.contains("rmmenr_secret"));
+    assert!(!dir.path().join("identity.json").exists());
+}
+
+#[test]
 fn missing_token_is_a_usage_error() {
     let dir = tempdir::Dir::new();
     let out = agent(dir.path(), &[], None);

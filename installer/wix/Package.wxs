@@ -26,8 +26,10 @@
     <!-- Public properties. The token never reaches the log, disk or registry. -->
     <Property Id="SERVER_URL" Secure="yes" />
     <Property Id="ENROLL_TOKEN" Secure="yes" Hidden="yes" />
-    <!-- Holds the enroll command line (contains the token) for the deferred action. -->
-    <Property Id="RmmEnroll" Value="-" Hidden="yes" />
+    <!-- Holds the enroll command line (contains the token) for the deferred action.
+         The name must equal the deferred action Id: that is how Windows Installer
+         hands it over as CustomActionData. -->
+    <Property Id="RmmEnrollRun" Value="-" Hidden="yes" />
 
     <Launch Condition="NOT ENROLL_TOKEN OR SERVER_URL"
             Message="SERVER_URL is required when ENROLL_TOKEN is set." />
@@ -96,7 +98,7 @@
                  Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
 
     <!-- Enrollment: first install with a token only; a failure rolls the install back. -->
-    <CustomAction Id="RmmEnrollData" Property="RmmEnroll" HideTarget="yes"
+    <CustomAction Id="RmmEnrollData" Property="RmmEnrollRun" HideTarget="yes"
                   Value="&quot;[BootstrapDir]rmm-agent.exe&quot; enroll --server &quot;[SERVER_URL]&quot; --token &quot;[ENROLL_TOKEN]&quot; --if-not-enrolled" />
     <CustomAction Id="RmmEnrollRun" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
                   Execute="deferred" Impersonate="no" Return="check" />

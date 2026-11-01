@@ -91,6 +91,61 @@ try {
     Check 'rollback: no Run value' (-not (Test-RunValue)) 'RMMSession Run value still present'
     $leak = Select-String -LiteralPath $log1 -Pattern $TestToken -SimpleMatch -Quiet
     Check 'log does not contain the token' (-not $leak) "$log1 contains the enrollment token"
+    # The failure must come from the agent actually running, not from an empty command.
+    $ran = Select-String -LiteralPath $log1 -Pattern 'server unreachable' -SimpleMatch -Quiet
+    Check 'rollback: failure came from the agent (server unreachable in log)' $ran "$log1 has no agent error text"
+
+    # 1b. Successful enrollment against a local stub server (loopback http is accepted).
+    $port = 18943
+    $stubBody = Join-Path $LogDir 'stub-request.json'
+    Remove-Item -LiteralPath $stubBody -Force -ErrorAction SilentlyContinue
+    $stub = Start-Job -ArgumentList $port, $stubBody -ScriptBlock {
+        param($Port, $BodyFile)
+        $l = New-Object System.Net.HttpListener
+        $l.Prefixes.Add("http://127.0.0.1:$Port/")
+        $l.Start()
+        try {
+            $ctx = $l.GetContext()
+            $reader = New-Object System.IO.StreamReader($ctx.Request.InputStream)
+            [System.IO.File]::WriteAllText($BodyFile, $reader.ReadToEnd())
+            $resp = @{
+                agent_id = '00000000-0000-0000-0000-0000000000a1'
+                device_id = '00000000-0000-0000-0000-0000000000d1'
+                client_id = '00000000-0000-0000-0000-0000000000c1'
+                nats_url = 'nats://127.0.0.1:4222'
+                trust = @{ manifest = $null; revocations = $null; techlist = $null }
+                status = 'active'
+            } | ConvertTo-Json -Depth 4
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($resp)
+            $ctx.Response.ContentType = 'application/json'
+            $ctx.Response.OutputStream.Write($bytes, 0, $bytes.Length)
+            $ctx.Response.Close()
+        } finally { $l.Stop() }
+    }
+    try {
+        Start-Sleep -Seconds 2
+        $logE = Join-Path $LogDir 'install-enroll.log'
+        $code = Invoke-Msi '/i' $logE "SERVER_URL=http://127.0.0.1:$port ENROLL_TOKEN=$TestToken"
+        $installed = $true
+        Check 'enroll install succeeds' (Test-MsiOk $code) "msiexec exit $code"
+        Check 'stub server received the enrollment request' (Test-Path -LiteralPath $stubBody) 'no request reached the stub'
+        Check 'stub request carried the token' ((Get-Content -LiteralPath $stubBody -Raw) -match [regex]::Escape($TestToken)) 'token missing from request'
+        $identityFile = Join-Path $DataRoot 'identity.json'
+        Check 'enrolled: identity.json exists' (Test-Path -LiteralPath $identityFile) "$identityFile missing"
+        Check 'enrolled: identity has the stub agent id' ((Get-Content -LiteralPath $identityFile -Raw) -match '0000000000a1') 'agent_id not in identity.json'
+        $leak = Select-String -LiteralPath $logE -Pattern $TestToken -SimpleMatch -Quiet
+        Check 'enroll success log does not contain the token' (-not $leak) "$logE contains the enrollment token"
+        $p = Start-Process -FilePath $BootstrapExe -NoNewWindow -Wait -PassThru -ArgumentList @('enroll', '--server', "http://127.0.0.1:$port", '--token', $TestToken, '--if-not-enrolled')
+        Check '--if-not-enrolled exits 0 when enrolled' ($p.ExitCode -eq 0) "exit $($p.ExitCode)"
+    }
+    finally {
+        Stop-Job -Job $stub -ErrorAction SilentlyContinue
+        Remove-Job -Job $stub -Force -ErrorAction SilentlyContinue
+    }
+    $code = Invoke-Msi '/x' (Join-Path $LogDir 'uninstall-enroll.log') ''
+    Check 'enroll install: uninstall succeeds' (Test-MsiOk $code) "msiexec exit $code"
+    $installed = $false
+    Check 'enroll install: ProgramData\RMM gone' (-not (Test-Path -LiteralPath $DataRoot)) "$DataRoot still present"
 
     # 2. Plain install without a token.
     $log2 = Join-Path $LogDir 'install.log'
