@@ -5,14 +5,14 @@
 **Wave**: 2
 **Agent**: engineering-security-engineer
 **Completed**: 2026-11-01
-**Failure Class**: BLOCKER (after one automatic ENVIRONMENT retry) — ENVIRONMENT issue persisted after one automatic retry: $ cargo test -p rmm-agent-core --test shell_session --release (exit 101)
+**Failure Class**: BLOCKER — $ cargo run -q -p xtask -- action-fixtures && git diff --exit-code crates/rmm-agent-core/tests/fixtures/ (exit 1)
 
 ## Agent Selection Rationale
 
 | Candidate | Semantic | Heuristic | Memory | Total | Source |
 |-----------|----------|-----------|--------|-------|--------|
-| engineering-security-engineer | — | 11 | 2.71 | 13.71 | mandatory |
-| engineering-senior-developer | — | 22 | 3.82 | 25.82 | heuristic |
+| engineering-security-engineer | — | 11 | 2.67 | 13.67 | mandatory |
+| engineering-senior-developer | — | 22 | 3.83 | 25.83 | heuristic |
 | engineering-infrastructure-devops | — | 17 | 3.67 | 20.67 | heuristic |
 
 - **Task type detected**: implementation
@@ -21,32 +21,21 @@
 - **Model tier**: sonnet
 
 ## Completed Tasks
-- [ ] Task 1: ShellOpen verification (partial)
-- [ ] Task 2: Session pump with backpressure, liveness and max_duration (partial)
-- [ ] Task 3: Agent wiring (partial)
+- [x] Task 1: ShellOpen verification (done)
+- [x] Task 2: Session pump with backpressure, liveness and max_duration (done)
+- [ ] Task 3: Agent wiring (skipped)
 
 ## Files Modified
-- `crates/rmm-agent-core/Cargo.toml`
-- `crates/rmm-agent-core/src/commands.rs`
-- `crates/rmm-agent-core/src/lib.rs`
-- `crates/rmm-agent-core/src/shell.rs`
-- `crates/rmm-agent-core/src/shell_verify.rs`
-- `crates/rmm-agent-core/tests/fixtures/README.md`
-- `crates/rmm-agent-core/tests/fixtures/cmd-shell-server-only.env`
-- `crates/rmm-agent-core/tests/fixtures/techlist-removed.env`
-- `crates/rmm-agent-core/tests/fixtures/techlist.env`
-- `crates/rmm-agent-core/tests/shell_session.rs`
-- `crates/rmm-agent-core/tests/shell_verify.rs`
-- `xtask/src/action_fixtures.rs`
+(none)
 
 ## Verification Results
-6/8 verification commands passed (run by Triad after the agent finished).
+7/8 verification commands passed (run by Triad after the agent finished).
 
 ## Verification Commands
 | Command | Exit Code | Result |
 |---------|-----------|--------|
 | `cargo test -p rmm-agent-core` | 0 | PASS |
-| `cargo test -p rmm-agent-core --test shell_session --release` | 101 | FAIL |
+| `RMM_ROOT_PUBKEYS=$(cat crates/rmm-agent-core/tests/fixtures/root.pub.hex) cargo test -p rmm-agent-core --test shell_session --release` | 0 | PASS |
 | `cargo clippy -p rmm-agent-core -p rmm-agent --all-targets -- -D warnings` | 0 | PASS |
 | `bash scripts/check-layering.sh` | 0 | PASS |
 | `bash scripts/check-agent-no-sign.sh` | 0 | PASS |
@@ -55,46 +44,33 @@
 | `cargo build -p rmm-agent` | 0 | PASS |
 
 ## Key Decisions
-(none)
+- The `ShellReject` list adds `spawn_failed` for a PTY that fails to start; it is reported as Validation.
 
 ## Issues Encountered
-- BLOCKER: ENVIRONMENT issue persisted after one automatic retry: $ cargo test -p rmm-agent-core --test shell_session --release (exit 101)
+- The fixture check `git diff --exit-code crates/rmm-agent-core/tests/fixtures/` fails until Triad commits, because tests/fixtures/README.md is tracked and has uncommitted changes. The regenerated output itself is identical.
+- Blocked: Task 3 needs a `ShellLink` for `async_nats::Client`. Reading a core-NATS `Subscriber` requires the `futures::Stream` trait (async-nats 0.51 has no inherent `next` and no re-export). None of rmm-agent-core's or rmm-agent's direct dependencies provide it. The plan forbids new dependencies and any Cargo.lock change, so the decision belongs to the orchestrator.
+- BLOCKER: $ cargo run -q -p xtask -- action-fixtures && git diff --exit-code crates/rmm-agent-core/tests/fixtures/ (exit 1)
 
 ## Escalations
 | # | Severity | Type | Decision | Status | Resolution |
 |---|----------|------|----------|--------|------------|
-| 1 | blocker | quality | Resolve: ENVIRONMENT issue persisted after one automatic retry: $ cargo test -p rmm-agent-core --test shell_session --release (exit 101) | pending |  |
+| 1 | blocker | unplanned-dependency | Approve adding `futures-util.workspace = true` to crates/rmm-agent-core/Cargo.toml. futures-util is already a workspace dependency and is already compiled in through async-nats, so no new crate is downloaded or built. Cargo.lock changes by one line, in rmm-agent-core's dependency list. After approval: implement `ShellLink for async_nats::Client` in shell.rs (subscribe, then forward each message's payload into a bounded `Inbound` channel of 64; dropping it unsubscribes), then wire main.rs (`IndicatorServer::start(None)`, logging and continuing on failure; `ShellManager::new`; `intake_with`). Estimated at about 60 lines. | pending | INVALID: type "unplanned-dependency" is not one of architecture, dependency, scope, schema, api, deletion, infrastructure, quality |
+| 2 | blocker | quality | Resolve: $ cargo run -q -p xtask -- action-fixtures && git diff --exit-code crates/rmm-agent-core/tests/fixtures/ (exit 1) | pending |  |
 
-- #1 context: Verification failed (cargo test -p rmm-agent-core --test shell_session --release; cargo run -q -p xtask -- action-fixtures && git diff --exit-code crates/rmm-agent-core/tests/fixtures/); a BLOCKER is not auto-fixed.
+- #1 context: The plan requires the NATS link and also says "no new crate dependencies; Cargo.lock must not change". Those two conflict. The other option is to have rmm-proto or rmm-platform expose a receive helper, but both crates are forbidden to this plan.
+- #2 context: Verification failed (cargo run -q -p xtask -- action-fixtures && git diff --exit-code crates/rmm-agent-core/tests/fixtures/); a BLOCKER is not auto-fixed.
 
 ## Handoff Context
-- **Key outputs**: crates/rmm-agent-core/Cargo.toml; crates/rmm-agent-core/src/commands.rs; crates/rmm-agent-core/src/lib.rs; crates/rmm-agent-core/src/shell.rs; crates/rmm-agent-core/src/shell_verify.rs; crates/rmm-agent-core/tests/fixtures/README.md; crates/rmm-agent-core/tests/fixtures/cmd-shell-server-only.env; crates/rmm-agent-core/tests/fixtures/techlist-removed.env; crates/rmm-agent-core/tests/fixtures/techlist.env; crates/rmm-agent-core/tests/shell_session.rs; crates/rmm-agent-core/tests/shell_verify.rs; xtask/src/action_fixtures.rs
-- **Decisions made**: (none)
+- **Key outputs**: (none)
+- **Decisions made**: The `ShellReject` list adds `spawn_failed` for a PTY that fails to start; it is reported as Validation.
 - **Open questions**: (none)
-- **Conventions established**: (none)
+- **Conventions established**: Commands enter through `commands::intake_with(client, &ident, store, opts, Some(ShellManager))`. `ShellManager::open` blocks for up to 5 s, so call it from a blocking context; `process_pending_with` already runs under `spawn_blocking`.
 
 ## Requirements Covered
 - REQ-18
 - REQ-19
 
 ### Failed verification output
-`cargo test -p rmm-agent-core --test shell_session --release`
-```
-   Compiling rmm-agent-core v0.1.0 (/home/user/custom-rmm/crates/rmm-agent-core)
-error[E0080]: evaluation panicked: RMM_ROOT_PUBKEYS must be set when building a release agent
-  --> crates/rmm-agent-core/src/enroll.rs:25:15
-   |
-25 |   const _: () = assert!(
-   |  _______________^
-26 | |     ROOT_PUBKEYS.is_some(),
-27 | |     "RMM_ROOT_PUBKEYS must be set when building a release agent"
-28 | | );
-   | |_^ evaluation of `enroll::_` failed here
-
-For more information about this error, try `rustc --explain E0080`.
-error: could not compile `rmm-agent-core` (lib) due to 1 previous error
-
-```
 `cargo run -q -p xtask -- action-fixtures && git diff --exit-code crates/rmm-agent-core/tests/fixtures/`
 ```
 crates/rmm-agent-core/tests/fixtures/README.md
@@ -121,4 +97,4 @@ crates/rmm-agent-core/tests/fixtures/README.md
 ```
 
 ## Token Usage
-55 requests, 8936042 input tokens (8699576 cached), 108273 output tokens, $5.0876
+17 requests, 904969 input tokens (759433 cached), 13467 output tokens, $1.1489
