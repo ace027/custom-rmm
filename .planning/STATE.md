@@ -1,13 +1,13 @@
 # Project State
 
 ## Current Position
-- **Phase**: 4 of 9 (planned)
-- **Status**: Phase 4 planned -- 3 plans across 2 waves
-- **Last Activity**: Phase 4 planning (2026-11-01)
+- **Phase**: 4 of 9 (executing)
+- **Status**: Phase 4 executing — Plan 04-02 failed
+- **Last Activity**: Plan 04-02 execution (2026-11-01)
 
 ## Progress
 ```
-[########............] 40% — 12/30 plans complete
+[########............] 43% — 13/30 plans complete
 ```
 
 ## Recent Decisions
@@ -53,3 +53,8 @@ Run `/triad:build` to execute Phase 4: Heartbeat, inventory and metrics
 - Plan 03-05 (Wave 3): NATS auth callout service and end-to-end enrollment — BLOCKED: The disk problem is fixed, but scripts/e2e-enroll.sh cannot pass until the agent's rustls provider bug is fixed in crates/rmm-agent-core, which is outside this plan's files.
 - Plan 03-05 (Wave 3): NATS auth callout service and end-to-end enrollment — BLOCKED: The fix is to add "nkeys" to the async-nats features in the root Cargo.toml (`features = ["websockets", "ring", "server_2_11", "nkeys"]`) and update Cargo.lock. Both files are forbidden to this plan. 
 - Plan 03-05 (Wave 3): NATS auth callout service and end-to-end enrollment — Complete with Warnings
+
+## Phase 4 Results
+(build started 2026-11-01)
+- Plan 04-01 (Wave 1): Telemetry schema, roles, RLS and repositories — Complete
+- Plan 04-02 (Wave 1): Telemetry wire types, collectors and agent publisher — PARTIAL: Telemetry wire types, sysinfo collectors and the `rmm-agent run` publisher are implemented and pass their tests, the Windows build, layering, no-sign and cargo deny. The workspace-wide clippy command 
