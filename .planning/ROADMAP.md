@@ -126,6 +126,6 @@
 | 4 | 3 | 3 | Complete |
 | 5 | 2 | 2 | Complete |
 | 6 | 4 | 4 | Complete |
-| 7 | 4 | 1 | Partial |
+| 7 | 4 | 3 | In Progress |
 | 8 | 3 | 0 | Pending |
 | 9 | 2 | 0 | Pending |

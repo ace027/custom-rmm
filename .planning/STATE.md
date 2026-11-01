@@ -1,13 +1,13 @@
 # Project State
 
 ## Current Position
-- **Phase**: 7 of 9 (partial — 2 plan(s) failed)
-- **Status**: Phase 7 partial — 07-02, 07-03 failed, stopped after wave 2, review needed
+- **Phase**: 7 of 9 (executing)
+- **Status**: Phase 7 executing — Plan 07-03 complete
 - **Last Activity**: Plan 07-03 execution (2026-11-01)
 
 ## Progress
 ```
-[##############......] 73% — 22/30 plans complete
+[################....] 80% — 24/30 plans complete
 ```
 
 ## Recent Decisions
@@ -89,3 +89,5 @@ Fix the failed plans and run `/triad:build` again (completed plans are kept), or
 - Plan 07-03 (Wave 2): Agent shell: co-sign verification, ConPTY session pump and lockout — PARTIAL: 
 - Plan 07-02 (Wave 2): Hardware-only WebAuthn registration, shell tables and techlist allowlist — FAILED: Verification failed: cargo run -q -p xtask -- openapi && git diff --exit-code docs/openapi.json
 - Plan 07-03 (Wave 2): Agent shell: co-sign verification, ConPTY session pump and lockout — PARTIAL: Task 3 needs a `ShellLink` for `async_nats::Client`. Reading a core-NATS `Subscriber` requires the `futures::Stream` trait (async-nats 0.51 has no inherent `next` and no re-export). None of rmm-agent-
+- Plan 07-02 (Wave 2): Hardware-only WebAuthn registration, shell tables and techlist allowlist — Complete with Warnings
+- Plan 07-03 (Wave 2): Agent shell: co-sign verification, ConPTY session pump and lockout — Complete
