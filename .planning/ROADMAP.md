@@ -127,5 +127,5 @@
 | 5 | 2 | 2 | Complete |
 | 6 | 4 | 4 | Complete |
 | 7 | 4 | 4 | Complete |
-| 8 | 3 | 1 | In Progress |
+| 8 | 3 | 2 | In Progress |
 | 9 | 2 | 0 | Pending |
