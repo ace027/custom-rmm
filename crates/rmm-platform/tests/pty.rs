@@ -97,16 +97,30 @@ mod windows {
             }
         });
         let mut w = pty.writer();
-        w.write_all(b"echo rmm-pty-ok & exit 3\r\n").expect("write");
-        w.flush().expect("flush");
-        let deadline = Instant::now() + Duration::from_secs(10);
+        // ConPTY opens with a cursor-position query (ESC[6n) and holds its
+        // output until the terminal answers. The browser terminal answers in
+        // production; here the test plays the terminal.
+        let started = Instant::now();
+        let deadline = started + Duration::from_secs(20);
         let mut seen = Vec::new();
+        let mut answered = false;
+        let mut sent = false;
         while Instant::now() < deadline {
             if let Ok(chunk) = rx.recv_timeout(Duration::from_millis(100)) {
                 seen.extend_from_slice(&chunk);
-                if String::from_utf8_lossy(&seen).contains("rmm-pty-ok") {
-                    break;
-                }
+            }
+            if !answered && seen.windows(4).any(|x| x == b"\x1b[6n") {
+                w.write_all(b"\x1b[1;1R").expect("write dsr reply");
+                w.flush().expect("flush");
+                answered = true;
+            }
+            if !sent && (answered || started.elapsed() > Duration::from_secs(2)) {
+                w.write_all(b"echo rmm-pty-ok & exit 3\r\n").expect("write");
+                w.flush().expect("flush");
+                sent = true;
+            }
+            if sent && String::from_utf8_lossy(&seen).contains("rmm-pty-ok") {
+                break;
             }
         }
         assert!(String::from_utf8_lossy(&seen).contains("rmm-pty-ok"));
