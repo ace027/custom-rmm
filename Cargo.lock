@@ -3026,6 +3026,7 @@ dependencies = [
  "reqwest",
  "rmm-db",
  "rmm-proto",
+ "rmm-recipe",
  "rmm-trust",
  "serde",
  "serde_json",
@@ -3076,8 +3077,13 @@ dependencies = [
 name = "rmm-recipe"
 version = "0.1.0"
 dependencies = [
+ "ciborium",
  "rmm-proto",
  "rmm-trust",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -3096,6 +3102,7 @@ dependencies = [
  "rmm-api",
  "rmm-db",
  "rmm-proto",
+ "rmm-recipe",
  "rmm-trust",
  "serde_json",
  "sha2 0.11.1",
@@ -5080,6 +5087,14 @@ dependencies = [
 [[package]]
 name = "xtask"
 version = "0.1.0"
+dependencies = [
+ "ciborium",
+ "hex",
+ "rmm-proto",
+ "rmm-recipe",
+ "rmm-trust",
+ "serde_json",
+]
 
 [[package]]
 name = "yoke"

@@ -12,6 +12,7 @@ futures-util.workspace = true
 rmm-api.workspace = true
 rmm-db.workspace = true
 rmm-trust.workspace = true
+rmm-recipe.workspace = true
 rmm-proto.workspace = true
 utoipa.workspace = true
 serde_json.workspace = true

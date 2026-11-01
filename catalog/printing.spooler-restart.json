@@ -1,0 +1,27 @@
+{
+  "id": "printing.spooler-restart",
+  "version": 1,
+  "title": "Restart the print spooler and clear its queue",
+  "capability": "service",
+  "reversible": true,
+  "max_autonomy": 1,
+  "min_agent_version": "0.1.0",
+  "timeout_s": 300,
+  "params": [],
+  "precheck": [
+    { "block": "service.query", "args": { "name": { "lit": "Spooler" } } }
+  ],
+  "steps": [
+    { "block": "service.stop", "args": { "name": { "lit": "Spooler" }, "timeout_s": { "lit": 30 } } },
+    { "block": "files.quarantine", "args": { "root": { "lit": "spool" }, "pattern": { "lit": "*" } } },
+    { "block": "service.start", "args": { "name": { "lit": "Spooler" }, "timeout_s": { "lit": 30 } } },
+    { "block": "service.wait", "args": { "name": { "lit": "Spooler" }, "state": { "lit": "running" }, "timeout_s": { "lit": 30 } } }
+  ],
+  "verify": [
+    { "block": "service.wait", "args": { "name": { "lit": "Spooler" }, "state": { "lit": "running" }, "timeout_s": { "lit": 10 } }, "retries": 2 }
+  ],
+  "rollback": [
+    { "block": "files.restore" },
+    { "block": "service.start", "args": { "name": { "lit": "Spooler" }, "timeout_s": { "lit": 30 } } }
+  ]
+}

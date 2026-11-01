@@ -1,4 +1,7 @@
-//! Developer automation: `cargo run -p xtask -- openapi [--check]`.
+//! Developer automation: `cargo run -p xtask -- openapi [--check]` and
+//! `cargo run -p xtask -- action-fixtures [--out DIR]`.
+
+mod action_fixtures;
 
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
@@ -45,7 +48,17 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("openapi") => openapi(args.iter().any(|a| a == "--check")),
-        _ => Err("usage: xtask openapi [--check]".to_string()),
+        Some("action-fixtures") => {
+            let out = match args.iter().position(|a| a == "--out") {
+                Some(i) => args.get(i + 1).map(PathBuf::from),
+                None => Some(action_fixtures::default_out(&root())),
+            };
+            match out {
+                Some(dir) => action_fixtures::run(&dir),
+                None => Err("--out needs a directory".to_string()),
+            }
+        }
+        _ => Err("usage: xtask openapi [--check] | action-fixtures [--out DIR]".to_string()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

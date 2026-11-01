@@ -20,6 +20,7 @@ reqwest.workspace = true
 async-nats.workspace = true
 rmm-db.workspace = true
 rmm-trust.workspace = true
+rmm-recipe.workspace = true
 rmm-proto.workspace = true
 sqlx.workspace = true
 tokio.workspace = true
