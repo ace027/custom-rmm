@@ -92,8 +92,8 @@
 ## Escalations
 | # | Severity | Type | Decision | Status | Resolution |
 |---|----------|------|----------|--------|------------|
-| 1 | blocker | out-of-scope file | Who fixes the missing `Store::outbox_clear()` call in crates/rmm-agent-core/src/enroll.rs:402? | pending | INVALID: type "out-of-scope file" is not one of architecture, dependency, scope, schema, api, deletion, infrastructure, quality |
-| 2 | blocker | api | Resolve: $ cargo clippy --workspace --all-targets --locked -- -D warnings (exit 101) | pending |  |
+| 1 | blocker | out-of-scope file | Who fixes the missing `Store::outbox_clear()` call in crates/rmm-agent-core/src/enroll.rs:402? | approved | Same root cause as #2; fixed by the orchestrator by adding Store::outbox_clear. |
+| 2 | blocker | api | Resolve: $ cargo clippy --workspace --all-targets --locked -- -D warnings (exit 101) | approved | Build break was pre-existing (Store::outbox_clear missing after a discarded phase 5 review leftover); orchestrator restored it (commit after 2018ece). Workspace clippy is clean; re-run 06-01 verification. |
 
 - #1 context: crates/rmm-agent-core/src/ is forbidden for this plan and I did not touch it. The error appears with this plan's changes in place. Only this plan's workspace-wide build and clippy criteria are affected.
 - #2 context: Verification failed (cargo clippy --workspace --all-targets --locked -- -D warnings; cargo build --workspace --locked); a BLOCKER is not auto-fixed.
