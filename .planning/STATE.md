@@ -1,13 +1,13 @@
 # Project State
 
 ## Current Position
-- **Phase**: 9 of 9 (partial — 1 plan(s) failed)
-- **Status**: Phase 9 partial — 09-02 failed, stopped after wave 2, review needed
+- **Phase**: 9 of 9 (executing)
+- **Status**: Phase 9 executing — Plan 09-02 complete
 - **Last Activity**: Plan 09-02 execution (2026-11-01)
 
 ## Progress
 ```
-[###################.] 96% — 29/30 plans complete
+[####################] 100% — 30/30 plans complete
 ```
 
 ## Recent Decisions
@@ -104,3 +104,4 @@ Fix the failed plans and run `/triad:build` again (completed plans are kept), or
 (build started 2026-11-01)
 - Plan 09-01 (Wave 1): WiX package, xtask msi and agent enrollment flag — Complete
 - Plan 09-02 (Wave 2): MSI CI checks and Windows validation matrix — PARTIAL: I wrote the check script, the CI `msi` job and the runbook, and linked the runbook from `docs/dev-environment.md`. The plan's grep and yaml checks pass. The script and the CI job have never run, becau
+- Plan 09-02 (Wave 2): MSI CI checks and Windows validation matrix — Complete
