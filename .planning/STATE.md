@@ -2,8 +2,8 @@
 
 ## Current Position
 - **Phase**: 7 of 9 (executing)
-- **Status**: Phase 7 executing — Plan 07-01 complete
-- **Last Activity**: Plan 07-01 execution (2026-11-01)
+- **Status**: Phase 7 executing — Plan 07-03 failed
+- **Last Activity**: Plan 07-03 execution (2026-11-01)
 
 ## Progress
 ```
@@ -85,3 +85,5 @@ Run `/triad:build` to execute Phase 7: Co-signed remote shell
 ## Phase 7 Results
 (build started 2026-11-01)
 - Plan 07-01 (Wave 1): Shell wire types, PTY abstraction and session indicator — Complete
+- Plan 07-02 (Wave 2): Hardware-only WebAuthn registration, shell tables and techlist allowlist — FAILED: Verification failed: cargo test -p rmm-db --test shell; cargo test -p rmm-api --test technicians; cargo run -q -p xtask -- openapi && git diff --exit-code docs/openapi.json; cargo sqlx prepare --works
+- Plan 07-03 (Wave 2): Agent shell: co-sign verification, ConPTY session pump and lockout — PARTIAL: 
