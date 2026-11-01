@@ -1,9 +1,9 @@
 # Project State
 
 ## Current Position
-- **Phase**: 9 of 9 (executed, pending review)
-- **Status**: Phase 9 under review — cycle 1/2, 1 blocker(s) remaining
-- **Last Activity**: Phase 9 review cycle 1 (2026-11-01)
+- **Phase**: 9 of 9 (complete)
+- **Status**: Phase 9 complete — review passed (2 cycle(s))
+- **Last Activity**: Phase 9 review (2026-11-01)
 
 ## Progress
 ```
@@ -29,7 +29,7 @@
 - rmm-sign extended (user-approved quick task): `definition` doc type (validated with rmm-recipe, catalog role) and `keygen-command` for the online server command key (0600 seed file; no seed export for root, catalog or card keys)
 
 ## Next Action
-Run `/triad:review` to verify Phase 9: MSI packaging
+All phases complete — project review finished!
 
 ## Phase 1 Results
 (build started 2026-10-31)
