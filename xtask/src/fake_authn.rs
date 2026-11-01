@@ -87,11 +87,11 @@ fn req(args: &[String], name: &str) -> Result<String, String> {
 }
 
 fn random<const N: usize>() -> Result<[u8; N], String> {
-    let mut b = [0u8; N];
+    let mut bytes = [0u8; N];
     rand::rngs::SysRng
-        .try_fill_bytes(&mut b)
+        .try_fill_bytes(&mut bytes)
         .map_err(err("random bytes"))?;
-    Ok(b)
+    Ok(bytes)
 }
 
 fn random_key() -> Result<SigningKey, String> {
@@ -125,8 +125,6 @@ fn write_file(path: &Path, data: &[u8], mode: u32) -> Result<(), String> {
     fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(mode))
         .map_err(|e| format!("chmod {}: {e}", path.display()))
 }
-
-// ---------------------------------------------------------------- X.509
 
 struct Profile {
     subject: Name,
@@ -202,8 +200,6 @@ fn make_cert(
         .map_err(err("sign certificate"))
 }
 
-// ---------------------------------------------------------------- ca
-
 fn ca(args: &[String]) -> Result<(), String> {
     let dir = req(args, "--out")?;
     let dir = Path::new(&dir);
@@ -239,8 +235,6 @@ fn ca(args: &[String]) -> Result<(), String> {
     println!("root={}", pem_path.display());
     Ok(())
 }
-
-// ---------------------------------------------------------------- credential
 
 fn cose_es256(key: &SigningKey) -> Result<Vec<u8>, String> {
     let point = key.verifying_key().to_sec1_point(false);
@@ -300,8 +294,6 @@ fn cbor_bytes(v: &Cbor) -> Result<Vec<u8>, String> {
     ciborium::ser::into_writer(v, &mut out).map_err(err("cbor"))?;
     Ok(out)
 }
-
-// ---------------------------------------------------------------- register
 
 async fn post_json(
     client: &reqwest::Client,
@@ -432,8 +424,6 @@ fn register(args: &[String]) -> Result<(), String> {
     println!("{done}");
     Ok(())
 }
-
-// ---------------------------------------------------------------- assert
 
 fn assert_cmd(args: &[String]) -> Result<(), String> {
     let file = req(args, "--grant-response")?;

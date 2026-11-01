@@ -59,14 +59,14 @@ pub struct Recorder {
 }
 
 fn private_dir(path: &Path) -> io::Result<()> {
-    let mut b = DirBuilder::new();
-    b.recursive(true);
+    let mut builder = DirBuilder::new();
+    builder.recursive(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
-        b.mode(0o700);
+        builder.mode(0o700);
     }
-    b.create(path)
+    builder.create(path)
 }
 
 fn create_private(path: &Path) -> io::Result<File> {
