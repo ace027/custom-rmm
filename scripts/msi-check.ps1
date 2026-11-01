@@ -88,7 +88,8 @@ try {
     Check 'rollback: no RMMWatchdog service' ($null -eq (Get-Svc)) 'service still present'
     Check 'rollback: no Program Files\RMM' (-not (Test-Path -LiteralPath $ProgFiles)) "$ProgFiles still present"
     Check 'rollback: no ProgramData\RMM\bootstrap' (-not (Test-Path -LiteralPath $Bootstrap)) "$Bootstrap still present"
-    Check 'rollback: no Run value' (-not (Test-RunValue)) 'RMMSession Run value still present'
+    Check 'rollback: no ProgramData\RMM left behind' (-not (Test-Path -LiteralPath $DataRoot)) "$DataRoot still present after the failed install (agent state outside MSI components?)"
+    Check 'rollback: no Run value'(-not (Test-RunValue)) 'RMMSession Run value still present'
     $leak = Select-String -LiteralPath $log1 -Pattern $TestToken -SimpleMatch -Quiet
     Check 'log does not contain the token' (-not $leak) "$log1 contains the enrollment token"
     # The failure must come from the agent actually running, not from an empty command.

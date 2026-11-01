@@ -145,6 +145,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      # Hosted runners only cover Server 2022/2025. Win10, Win11 and Server 2019 have no
+      # hosted runner (windows-2019 is retired) and must be validated manually; see
+      # the msi-validation runbook.
       matrix:
         os: [windows-2022, windows-2025]
     env:
