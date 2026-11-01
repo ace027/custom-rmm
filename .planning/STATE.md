@@ -1,8 +1,8 @@
 # Project State
 
 ## Current Position
-- **Phase**: 6 of 9 (executing)
-- **Status**: Phase 6 executing — Plan 06-04 complete
+- **Phase**: 6 of 9 (executed, pending review)
+- **Status**: Phase 6 complete — all plans executed successfully
 - **Last Activity**: Plan 06-04 execution (2026-11-01)
 
 ## Progress
@@ -29,7 +29,7 @@
 - rmm-sign extended (user-approved quick task): `definition` doc type (validated with rmm-recipe, catalog role) and `keygen-command` for the online server command key (0600 seed file; no seed export for root, catalog or card keys)
 
 ## Next Action
-Fix the failed plans and run `/triad:build` again (completed plans are kept), or run `/triad:review`
+Run `/triad:review` to verify Phase 6: Signed commands and first catalog action
 
 ## Phase 1 Results
 (build started 2026-10-31)
