@@ -1,9 +1,9 @@
 # Project State
 
 ## Current Position
-- **Phase**: 7 of 9 (complete)
-- **Status**: Phase 7 complete — review passed (2 cycle(s))
-- **Last Activity**: Phase 7 review (2026-11-01)
+- **Phase**: 8 of 9 (planned)
+- **Status**: Phase 8 planned -- 3 plans across 3 waves
+- **Last Activity**: Phase 8 planning (2026-11-01)
 
 ## Progress
 ```
@@ -29,7 +29,7 @@
 - rmm-sign extended (user-approved quick task): `definition` doc type (validated with rmm-recipe, catalog role) and `keygen-command` for the online server command key (0600 seed file; no seed export for root, catalog or card keys)
 
 ## Next Action
-Run `/triad:plan 8` to plan Phase 8: Watchdog and A/B updater
+Run `/triad:build` to execute Phase 8: Watchdog and A/B updater
 
 ## Phase 1 Results
 (build started 2026-10-31)
