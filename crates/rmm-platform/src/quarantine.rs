@@ -280,8 +280,6 @@ fn hash_file(path: &Path) -> Result<(u64, [u8; 32])> {
     Ok((size, h.finish()))
 }
 
-// ---------------------------------------------------------------- manifest
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Entry {
     original: String,
@@ -572,8 +570,6 @@ impl Parser<'_> {
         }
     }
 }
-
-// ----------------------------------------------------------------- SHA-256
 
 const K: [u32; 64] = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
