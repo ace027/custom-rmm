@@ -108,6 +108,7 @@ struct Current {
     cpu_cores: Option<i32>,
     ram_bytes: Option<i64>,
     disk_total_bytes: Option<i64>,
+    #[allow(dead_code)] // selected to keep the query shape; never diffed (volatile)
     disk_free_bytes: Option<i64>,
     last_boot: Option<DateTime<Utc>>,
     inventory_hash: Option<Vec<u8>>,
@@ -162,7 +163,7 @@ pub async fn apply_inventory(
     field!(cpu_cores);
     field!(ram_bytes);
     field!(disk_total_bytes);
-    field!(disk_free_bytes);
+    // disk_free_bytes is volatile: updated below but never diffed into an event.
     if cur.last_boot != inv.last_boot {
         changed.push("last_boot".to_owned());
         before.push(("last_boot".to_owned(), ts_json(cur.last_boot)));
@@ -187,6 +188,10 @@ pub async fn apply_inventory(
     )
     .execute(&mut **tx)
     .await?;
+
+    if changed.is_empty() {
+        return Ok(Some(changed));
+    }
 
     sqlx::query!(
         "insert into tenant.device_event (client_id, device_id, at, type, before, after) \
