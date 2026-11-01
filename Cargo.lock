@@ -3157,6 +3157,7 @@ dependencies = [
  "rmm-recipe",
  "rmm-trust",
  "rusqlite",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.11.1",

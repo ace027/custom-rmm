@@ -119,6 +119,10 @@ jobs:
         env:
           RMM_HTTPS_PORT: "8443"
         run: scripts/e2e-shell.sh
+      - name: End-to-end A/B update (signed update, health rollback, downgrade and tamper rejection, core restart)
+        env:
+          RMM_HTTPS_PORT: "8443"
+        run: scripts/e2e-update.sh
       - name: sqlx offline data is current
         env:
           SQLX_OFFLINE: "false"

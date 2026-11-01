@@ -289,3 +289,28 @@ forward WebSocket upgrades on `/api/`. An admin downloads the recording from
 and files older than `RMM_RECORDING_RETENTION_DAYS` (default 365) once a day.
 `e2e-shell.sh` takes about two minutes, most of it the 50 MB print and the
 45 s liveness wait.
+
+## A/B update (dev)
+
+`scripts/e2e-update.sh` proves the whole update path against the dev stack.
+`scripts/dev-trust.sh` now also creates `release.age` (the dev release key,
+role `release` in the manifest; an older tree re-signs its trust documents once)
+and `deploy/dev/artifacts/` (mode 777: the API container, uid 10001, stores
+uploaded artifacts there under their SHA-256). The script builds the agent twice
+(`RMM_AGENT_VERSION=0.1.0` as the watchdog's bootstrap, `0.1.1` as the release
+artifact), enrolls it and runs `rmm-watchdog run --root DIR --state-dir DIR
+--health-timeout 60` in a private mount namespace with a fake `/sys/class/dmi`
+(root or passwordless sudo needed). Debug agents refresh every
+`RMM_AGENT_REFRESH_INTERVAL_SECS` seconds instead of 15 minutes. Checks: (1) a
+signed 0.1.1 is staged, installed and promoted; (2) a 0.1.2 that never reports
+healthy is rolled back within 60 s + 30 s and lands in `bad_hashes`, and is not
+staged again; (3) a signed 0.1.0 is skipped as a downgrade, and planted in
+`pending/` the watchdog rejects it; (4) an artifact whose bytes differ from the
+signed hash is rejected by the agent, and one altered in `pending/` by the
+watchdog (both `hash_mismatch`); (5) `kill -9` of the agent starts a new one
+within 10 s. The server does not store the agent version, so the script reads
+the new version from `health.json`, which the agent writes only after a
+heartbeat went out, and checks that `last_seen` keeps advancing. The agent
+stages updates only when `RMM_WATCHDOG_ROOT` (default: the parent of the state
+directory, `%ProgramData%\RMM` on Windows) holds a `state.json` or `bootstrap/`;
+otherwise it logs that updates are disabled. It takes about five minutes.

@@ -160,7 +160,7 @@ pub fn build_heartbeat(uptime_s: u64) -> Heartbeat {
         v: SCHEMA_VERSION,
         msg_id: Uuid::now_v7(),
         sent_at: now_ms(),
-        agent_version: env!("CARGO_PKG_VERSION").to_owned(),
+        agent_version: crate::update::AGENT_VERSION.to_owned(),
         uptime_s,
     }
 }
@@ -361,14 +361,22 @@ struct Publisher {
 }
 
 impl Publisher {
-    async fn heartbeat(&self, subject: String, hb: &Heartbeat) {
+    /// Publish a heartbeat; true when it went out on a live connection.
+    async fn heartbeat(&self, subject: String, hb: &Heartbeat) -> bool {
         match telemetry::encode(hb) {
-            Ok(bytes) => {
-                if let Err(e) = self.client.publish(subject, bytes.into()).await {
-                    tracing::warn!("heartbeat publish failed: {e}");
+            Ok(bytes) => match self.client.publish(subject, bytes.into()).await {
+                Ok(()) => {
+                    self.client.connection_state() == async_nats::connection::State::Connected
                 }
+                Err(e) => {
+                    tracing::warn!("heartbeat publish failed: {e}");
+                    false
+                }
+            },
+            Err(e) => {
+                tracing::warn!("heartbeat encode failed: {e}");
+                false
             }
-            Err(e) => tracing::warn!("heartbeat encode failed: {e}"),
         }
     }
 
@@ -417,6 +425,26 @@ pub async fn run_telemetry(
     reconnect: Arc<Notify>,
     shutdown: CancellationToken,
 ) -> Result<(), TelemetryError> {
+    run_telemetry_with_health(
+        client, identity, platform, intervals, store, reconnect, shutdown, None,
+    )
+    .await
+}
+
+/// [`run_telemetry`] that also rewrites `health.json` in `health_dir` (the
+/// watchdog's health signal, see [`crate::health`]) after each heartbeat that
+/// went out on a live connection.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_telemetry_with_health(
+    client: async_nats::Client,
+    identity: &Identity,
+    platform: impl Platform + Send,
+    intervals: Intervals,
+    store: Arc<Store>,
+    reconnect: Arc<Notify>,
+    shutdown: CancellationToken,
+    health_dir: Option<std::path::PathBuf>,
+) -> Result<(), TelemetryError> {
     let wake = Arc::new(Notify::new());
     let drain = tokio::spawn(drain_loop(
         Arc::clone(&store),
@@ -453,7 +481,18 @@ pub async fn run_telemetry(
             }
             () = tokio::time::sleep_until(next_hb) => {
                 let uptime = tokio::task::spawn_blocking(collect::uptime_s).await.unwrap_or(0);
-                publisher.heartbeat(hb_subject.clone(), &build_heartbeat(uptime)).await;
+                let sent = publisher.heartbeat(hb_subject.clone(), &build_heartbeat(uptime)).await;
+                if let (true, Some(dir)) = (sent, health_dir.clone()) {
+                    match tokio::task::spawn_blocking(move || {
+                        crate::health::write(&dir, crate::update::AGENT_VERSION)
+                    })
+                    .await
+                    {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => tracing::warn!("health signal write failed: {e}"),
+                        Err(e) => tracing::warn!("health signal task failed: {e}"),
+                    }
+                }
                 next_hb = Instant::now() + jitter(intervals.hb);
             }
             () = tokio::time::sleep_until(next_metric) => {

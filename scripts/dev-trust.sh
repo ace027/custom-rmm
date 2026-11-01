@@ -2,11 +2,13 @@
 # Bootstrap the dev trust chain with rmm-sign (file backend, throwaway keys).
 #
 # Creates under deploy/dev/trust (gitignored):
-#   root.age, catalog.age   age-encrypted keys, passphrase "dev-only"
+#   root.age, catalog.age, release.age
+#                           age-encrypted keys, passphrase "dev-only"
 #   command.seed            the API's online command key (hex seed)
 #   manifest.env            root-signed manifest: catalog key (catalog,
-#                           artifact-revoke, techlist), command key (command),
-#                           capability ceiling [service, files.write]
+#                           artifact-revoke, techlist), release key (release),
+#                           command key (command), capability ceiling
+#                           [service, files.write]
 #   revocations.env         catalog-signed, empty, 45-day expiry
 #   printing.spooler-restart.env   catalog-signed spooler definition
 # and, next to it, for the dev co-signed shell:
@@ -14,6 +16,7 @@
 #                           authenticator (cargo run -p xtask -- fake-authn ca);
 #                           the API container mounts it read-only. Dev only.
 #   deploy/dev/recordings   where the API container writes shell recordings
+#   deploy/dev/artifacts    where the API container stores release artifacts
 # and prints ROOT_PUBKEYS=<hex> on stdout (everything else goes to stderr).
 #
 # Idempotent: keys are created once and nothing is re-signed unless --force.
@@ -49,6 +52,13 @@ if [[ ! -f $dir/catalog.age ]]; then
   sign keygen-root --out "$dir/catalog.age" >/dev/null 2>&1
   log "created catalog key"
 fi
+# A dev tree created before the release role existed has a manifest without
+# it: a new release key forces the trust documents to be signed again.
+if [[ ! -f $dir/release.age ]]; then
+  sign keygen-root --out "$dir/release.age" >/dev/null 2>&1
+  force=1
+  log "created release key"
+fi
 if [[ ! -f $dir/command.seed ]]; then
   out=$(sign keygen-command --out "$dir/command.seed" 2>/dev/null)
   printf '%s\n' "$out" >"$dir/command.pub"
@@ -71,16 +81,20 @@ fi
 web=deploy/dev/webauthn
 cargo run -q --locked -p xtask -- fake-authn ca --out "$web" >/dev/null
 chmod 755 "$web"
-mkdir -p deploy/dev/recordings
-chmod 777 deploy/dev/recordings
+mkdir -p deploy/dev/recordings deploy/dev/artifacts
+chmod 777 deploy/dev/recordings deploy/dev/artifacts
 
 root=$(pubkey_of "$dir/root.age")
 cat=$(pubkey_of "$dir/catalog.age")
 root_pub=$(field public_key "$root")
 cat_pub=$(field public_key "$cat")
 cat_id=$(field key_id "$cat")
+rel=$(pubkey_of "$dir/release.age")
+rel_pub=$(field public_key "$rel")
+rel_id=$(field key_id "$rel")
 cmd_pub=$(sed -n 's/^public=//p' "$dir/command.pub")
 cmd_id=$(sed -n 's/^key_id=//p' "$dir/command.pub")
+[[ -n $rel_pub && -n $rel_id ]] || { echo "error: cannot read release key" >&2; exit 1; }
 [[ -n $root_pub && -n $cat_pub && -n $cmd_pub && -n $cmd_id ]] || { echo "error: cannot read key material" >&2; exit 1; }
 
 if [[ -z $force && -f $dir/manifest.env && -f $dir/revocations.env && -f $dir/printing.spooler-restart.env ]]; then
@@ -110,6 +124,15 @@ cat >"$dir/manifest.json" <<JSON
       "label": "dev catalog key"
     },
     {
+      "key_id": "$rel_id",
+      "pubkey": "$rel_pub",
+      "alg": "ed25519",
+      "roles": ["release"],
+      "not_before": $((now - 60)),
+      "not_after": $((now + 90 * day)),
+      "label": "dev release key"
+    },
+    {
       "key_id": "$cmd_id",
       "pubkey": "$cmd_pub",
       "alg": "ed25519",
@@ -119,7 +142,7 @@ cat >"$dir/manifest.json" <<JSON
       "label": "dev command key"
     }
   ],
-  "thresholds": {"catalog": 1, "artifact-revoke": 1, "techlist": 1, "command": 1},
+  "thresholds": {"catalog": 1, "artifact-revoke": 1, "techlist": 1, "release": 1, "command": 1},
   "revoked_keys": [],
   "console_rp_id": "localhost",
   "console_origins": ["https://localhost"],

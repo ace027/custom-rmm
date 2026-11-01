@@ -6,6 +6,7 @@ pub mod blocks;
 pub mod commands;
 pub mod enroll;
 pub mod executor;
+pub mod health;
 pub mod identity;
 pub mod refresh;
 pub mod shell;
@@ -13,6 +14,7 @@ pub mod shell_verify;
 pub mod store;
 pub mod telemetry;
 pub mod transport;
+pub mod update;
 
 use rmm_platform::Platform;
 

@@ -14,6 +14,7 @@ use rmm_agent_core::shell::{Indicator, SessionConfig, ShellLink, ShellManager};
 use rmm_agent_core::store::{STORE_KEY_FILE, Store};
 use rmm_agent_core::telemetry::{self as agent_telemetry, CancellationToken, Intervals};
 use rmm_agent_core::transport::{self, ConnState};
+use rmm_agent_core::update::{self, AGENT_VERSION, UpdateCtx, Updater};
 use rmm_platform::indicator::IndicatorServer;
 use tokio::sync::Notify;
 
@@ -21,9 +22,11 @@ const EXIT_FAILURE: u8 = 1;
 const EXIT_ALREADY_ENROLLED: u8 = 2;
 const EXIT_TOKEN_REJECTED: u8 = 3;
 const EXIT_UNREACHABLE: u8 = 4;
+/// Debug builds only: seconds between refreshes (default 15 minutes).
+const REFRESH_INTERVAL_ENV: &str = "RMM_AGENT_REFRESH_INTERVAL_SECS";
 
 #[derive(Debug, Parser)]
-#[command(name = "rmm-agent", version)]
+#[command(name = "rmm-agent", version = AGENT_VERSION)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -201,28 +204,33 @@ async fn run(state_dir: Option<PathBuf>, once: bool) -> u8 {
                 })
             });
     // Newer trust documents (technician lists above all) and releases are
-    // fetched on every connect and every 15 minutes. No update client yet:
-    // offered releases are only logged.
+    // fetched on every connect and every 15 minutes. Verified newer releases
+    // are staged for the watchdog; without a watchdog root they are only logged.
     let refresh_wake = Arc::new(Notify::new());
+    let on_release = store
+        .clone()
+        .zip(agent.clone())
+        .and_then(|(store, agent)| updater(&dir, &ident, &client, store, agent));
     let refresh_task = store.clone().zip(agent).map(|(store, agent)| {
         let opts = RefreshOptions {
             agent,
             shell,
-            on_release: None,
+            on_release,
             wake: Arc::clone(&refresh_wake),
             shutdown: shutdown.clone(),
         };
         let client = client.clone();
-        tokio::spawn(refresh::run(client, store, opts, REFRESH_INTERVAL))
+        tokio::spawn(refresh::run(client, store, opts, refresh_interval()))
     });
     let telemetry_task = store.map(|store| {
         let client = client.clone();
         let ident = ident.clone();
         let token = shutdown.clone();
         let reconnect = Arc::clone(&reconnect);
+        let health_dir = dir.clone();
         tokio::spawn(async move {
             let platform = rmm_platform::current();
-            if let Err(e) = agent_telemetry::run_telemetry(
+            if let Err(e) = agent_telemetry::run_telemetry_with_health(
                 client,
                 &ident,
                 platform,
@@ -230,6 +238,7 @@ async fn run(state_dir: Option<PathBuf>, once: bool) -> u8 {
                 store,
                 reconnect,
                 token,
+                Some(health_dir),
             )
             .await
             {
@@ -271,6 +280,51 @@ async fn run(state_dir: Option<PathBuf>, once: bool) -> u8 {
         let _ = task.await;
     }
     code
+}
+
+/// Refresh period: 15 minutes; debug builds may shorten it for tests.
+fn refresh_interval() -> std::time::Duration {
+    if cfg!(debug_assertions)
+        && let Some(secs) = std::env::var(REFRESH_INTERVAL_ENV)
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|s| *s > 0)
+    {
+        return std::time::Duration::from_secs(secs);
+    }
+    REFRESH_INTERVAL
+}
+
+/// The release callback that stages updates for the watchdog, or `None` (after
+/// one log line) when the agent runs without a watchdog root.
+fn updater(
+    state_dir: &std::path::Path,
+    ident: &identity::Identity,
+    client: &update::NatsClient,
+    store: Arc<Store>,
+    agent: Arc<Agent>,
+) -> Option<refresh::ReleaseCallback> {
+    let Some(root) = update::watchdog_root(state_dir).filter(|r| update::root_is_managed(r)) else {
+        tracing::info!("no watchdog root: updates are disabled");
+        return None;
+    };
+    let http = match enroll::http_client(extra_ca().as_deref()) {
+        Ok(h) => h,
+        Err(e) => {
+            tracing::warn!("updates disabled: {e}");
+            return None;
+        }
+    };
+    tracing::info!(root = %root.display(), version = AGENT_VERSION, "updates enabled");
+    let ctx = UpdateCtx {
+        api_base: ident.server_url.clone(),
+        root,
+        platform: update::platform(),
+        current_version: AGENT_VERSION.to_owned(),
+        http,
+    };
+    let updater = Updater::new(client.clone(), store, agent, ctx);
+    Some(Arc::new(move |release| updater.offer(release)))
 }
 
 /// The shell session manager over the agent's NATS connection, with the
