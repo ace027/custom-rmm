@@ -124,7 +124,7 @@
 | 2 | 4 | 4 | Complete |
 | 3 | 5 | 5 | Complete |
 | 4 | 3 | 3 | Complete |
-| 5 | 2 | 1 | In Progress |
+| 5 | 2 | 1 | Partial |
 | 6 | 4 | 0 | Pending |
 | 7 | 4 | 0 | Pending |
 | 8 | 3 | 0 | Pending |

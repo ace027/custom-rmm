@@ -2,8 +2,8 @@
 
 ## Current Position
 - **Phase**: 5 of 9 (executing)
-- **Status**: Phase 5 executing — Plan 05-01 complete
-- **Last Activity**: Plan 05-01 execution (2026-11-01)
+- **Status**: Phase 5 executing — Plan 05-02 failed
+- **Last Activity**: Plan 05-02 execution (2026-11-01)
 
 ## Progress
 ```
@@ -67,3 +67,4 @@ Fix the failed plans and run `/triad:build` again (completed plans are kept), or
 (build started 2026-11-01)
 - Plan 05-01 (Wave 1): Encrypted local store — FAILED: Verification failed: scripts/check-layering.sh
 - Plan 05-01 (Wave 1): Encrypted local store — Complete
+- Plan 05-02 (Wave 2): Offline outbox, drain and server-side dedupe — PARTIAL: Dedupe, the agent outbox with drain on reconnect, and e2e-offline.sh are done. e2e-offline.sh passes again after the retry (Docker Hub 429 cleared). e2e-telemetry.sh still fails at check (6b) because 
