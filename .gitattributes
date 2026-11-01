@@ -1,0 +1,3 @@
+# Test fixtures are byte-exact (sizes and hashes are signed); never convert line endings.
+crates/rmm-watchdog/tests/fixtures/** -text
+crates/rmm-agent-core/tests/fixtures/** -text

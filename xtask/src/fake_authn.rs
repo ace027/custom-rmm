@@ -111,19 +111,23 @@ fn key_from_hex(hex: &str) -> Result<SigningKey, String> {
 
 fn write_file(path: &Path, data: &[u8], mode: u32) -> Result<(), String> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut f = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(mode)
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut opts, mode);
+    let mut f = opts
         .open(path)
         .map_err(|e| format!("write {}: {e}", path.display()))?;
     f.write_all(data)
         .map_err(|e| format!("write {}: {e}", path.display()))?;
-    // `mode` only applies to new files.
+    // `mode` only applies to new files. The fake authenticator is a dev tool;
+    // on Windows the file keeps its inherited ACL.
+    #[cfg(unix)]
     fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(mode))
-        .map_err(|e| format!("chmod {}: {e}", path.display()))
+        .map_err(|e| format!("chmod {}: {e}", path.display()))?;
+    #[cfg(not(unix))]
+    let _ = mode;
+    Ok(())
 }
 
 struct Profile {
