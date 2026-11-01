@@ -210,7 +210,7 @@ pass "(6a) agent at 50 ms metric interval: $((R1 - R0)) batches landed, 0 pendin
 # newline-separated for `nats pub --send-on newline`, so no encoded byte may be
 # 0x0a.
 python3 -I - >"$WORK/burst.cbor" <<'PY'
-import struct, sys, time
+import os, struct, sys, time
 
 def head(major, n):
     if n < 24:
@@ -228,10 +228,12 @@ while b"\n" in struct.pack(">Q", now):
     now += 1
 sample = (head(5, 3) + text("t") + head(0, now) + text("metric") + text("e2e.burst")
           + text("value") + b"\xfb" + struct.pack(">d", 1.0))
+run_id = bytes(b if b != 0x0a else 0x0b for b in os.urandom(14))
 out = sys.stdout.buffer
 for i in range(1000):
-    # 14 fixed bytes plus two counter bytes in 0x10..0xd7, never 0x0a.
-    msg_id = bytes(range(0x20, 0x2e)) + bytes([0x10 + i // 200, 0x10 + i % 200])
+    # 14 random-per-run bytes (so reruns are not deduplicated) plus two
+    # counter bytes in 0x10..0xd7; no byte is 0x0a.
+    msg_id = run_id + bytes([0x10 + i // 200, 0x10 + i % 200])
     body = (head(5, 4) + text("v") + head(0, 1)
             + text("msg_id") + head(2, 16) + msg_id
             + text("sent_at") + head(0, now)
