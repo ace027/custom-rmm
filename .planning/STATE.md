@@ -1,13 +1,13 @@
 # Project State
 
 ## Current Position
-- **Phase**: 6 of 9 (partial — 1 plan(s) failed)
-- **Status**: Phase 6 partial — 06-04 failed, stopped after wave 3, review needed
+- **Phase**: 6 of 9 (executing)
+- **Status**: Phase 6 executing — Plan 06-04 complete
 - **Last Activity**: Plan 06-04 execution (2026-11-01)
 
 ## Progress
 ```
-[#############.......] 66% — 20/30 plans complete
+[##############......] 70% — 21/30 plans complete
 ```
 
 ## Recent Decisions
@@ -80,3 +80,4 @@ Fix the failed plans and run `/triad:build` again (completed plans are kept), or
 - Plan 06-03 (Wave 2): Catalog, command issuing and result ingest — Complete
 - Plan 06-04 (Wave 3): Dev trust bootstrap, end-to-end actions and CI — BLOCKED: ENVIRONMENT issue requires human approval: free disk space on the Docker host. Separately, `rmm-sign` lacks definition signing and seed export, which needs a change in `crates/rmm-sign`.
 - Plan 06-04 (Wave 3): Dev trust bootstrap, end-to-end actions and CI — PARTIAL: none
+- Plan 06-04 (Wave 3): Dev trust bootstrap, end-to-end actions and CI — Complete

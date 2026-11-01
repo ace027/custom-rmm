@@ -1,7 +1,7 @@
 ---
 phase: 06-signed-commands-and-first-catalog-action
 compacted: 2026-11-01
-original_summaries: [06-01-SUMMARY.md, 06-02-SUMMARY.md, 06-03-SUMMARY.md]
+original_summaries: [06-01-SUMMARY.md, 06-02-SUMMARY.md, 06-03-SUMMARY.md, 06-04-SUMMARY.md]
 requirements_satisfied: [REQ-15, REQ-16, REQ-17]
 ---
 
@@ -11,6 +11,7 @@ requirements_satisfied: [REQ-15, REQ-16, REQ-17]
 - 06-01 Recipe schema, validator, fixtures and phase dependencies (Complete)
 - 06-02 Agent building blocks, command intake and executor (Complete): crates/rmm-agent-core/src/blocks.rs, crates/rmm-agent-core/src/commands.rs, crates/rmm-agent-core/src/executor.rs, crates/rmm-agent-core/src/lib.rs, crates/rmm-agent-core/src/store.rs, crates/rmm-agent-core/tests/commands.rs, crates/rmm-agent-core/tests/executor.rs, crates/rmm-agent/src/main.rs, crates/rmm-platform/src/fake.rs, crates/rmm-platform/src/lib.rs, crates/rmm-platform/src/quarantine.rs, crates/rmm-platform/src/services.rs, crates/rmm-platform/src/windows.rs, crates/rmm-platform/tests/windows_spooler.rs
 - 06-03 Catalog, command issuing and result ingest (Complete): .sqlx/query-0b100ff04558a0fc2b4a5f6726dcbb6cc30812c073b24b5058bd9a1db1e34fb0.json, .sqlx/query-347c2426cb39d662aa0435b4644a39d762f64300bbc43e01774c83606ad4720a.json, .sqlx/query-b3aafbde51430c40abf9a22a0c82c54653de071f4f25b24937ad4a03dae84bdb.json, .sqlx/query-bce62c5c0c405bd0f38953be0726bcd08eddf28b5e394305c1a7df271ab8a089.json, .sqlx/query-d7e492e45470703fe6987efa3d43f6d2b95e5fbcbc0fbc04470eb51cba350d82.json, .sqlx/query-f69ce15fc3aaeae0d6e14add0d47b84139fe7d6220a448e3582bd92ad08ab61a.json, crates/rmm-api/src/actions.rs, crates/rmm-api/src/enroll.rs, crates/rmm-api/src/lib.rs, crates/rmm-api/src/state.rs, crates/rmm-api/tests/actions.rs, crates/rmm-db/migrations/0005_actions.sql, crates/rmm-db/src/actions.rs, crates/rmm-db/src/lib.rs, crates/rmm-db/tests/actions.rs, crates/rmm-server/src/api.rs, crates/rmm-server/src/ingest.rs, crates/rmm-server/src/natsjwt.rs, crates/rmm-server/src/results.rs, crates/rmm-server/tests/natsjwt.rs, crates/rmm-server/tests/results.rs, docs/openapi.json
+- 06-04 Dev trust bootstrap, end-to-end actions and CI (Complete)
 
 ## Decisions
 - 06-01: none new. I reused the earlier implementation as it stood.
@@ -31,6 +32,7 @@ requirements_satisfied: [REQ-15, REQ-16, REQ-17]
 - 06-03 convention: RESULT stream: subjects `result.>`, durable consumer `results`. The agent publishes `result.<client>.<agent>` with an rmm.result/1 envelope signed by exactly on
 - 06-03 convention: CMD stream: `CMD` on subjects `agent.*.cmd` (file storage, 7 d, 10 min duplicate window). The consumer `agent_<uuid>` is filtered to `agent.<uuid>.cmd`, ack exp
 - 06-03 convention: The API needs RMM_COMMAND_KEY_FILE (a 32-byte seed as hex) and the command public key certified for Role::Command in the manifest. The dev trust script (06-04) 
+- 06-04 convention: Trust material is in `deploy/dev/trust/` (gitignored). `dev-up.sh` writes `RMM_ROOT_PUBKEYS` into `deploy/.env`. The e2e scripts build the agent with that value
 
 ## Files Modified
 | File | Change |
@@ -76,11 +78,13 @@ requirements_satisfied: [REQ-15, REQ-16, REQ-17]
 - 06-01 (REQ-15, REQ-16): 8/8 verification commands passed
 - 06-02 (REQ-15, REQ-16, REQ-17): 10/10 verification commands passed
 - 06-03 (REQ-15, REQ-16, REQ-17): 9/9 verification commands passed
+- 06-04 (REQ-15, REQ-16, REQ-17): 12/12 verification commands passed
 
 ## Agents
 - 06-01: engineering-security-engineer
 - 06-02: engineering-senior-developer
 - 06-03: engineering-backend-architect
+- 06-04: testing-qa-verification-specialist
 
 ## Also Covered
 - Cargo.lock
@@ -97,3 +101,15 @@ requirements_satisfied: [REQ-15, REQ-16, REQ-17]
 - xtask/src/main.rs
 - xtask/src/action_fixtures.rs
 - catalog/printing.spooler-restart.json
+- scripts/dev-trust.sh
+- scripts/dev-up.sh
+- deploy/compose.yaml
+- deploy/.env.example
+- scripts/e2e-actions.sh
+- .github/workflows/ci.yml
+- scripts/ci-local.sh
+- docs/dev-environment.md
+- docs/runbooks/windows-action-check.md
+- scripts/e2e-enroll.sh
+- scripts/e2e-telemetry.sh
+- scripts/e2e-offline.sh
