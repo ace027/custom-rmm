@@ -566,3 +566,158 @@ fn expired_command_fails_verify() {
     );
     assert_expired(&verify_at(NOW + 600));
 }
+
+fn catalog_manifest_json(root: &Key, cat: &Key) -> String {
+    format!(
+        r#"{{
+  "seq": 1,
+  "issued_at": {NOW},
+  "expires_at": {exp},
+  "root_keys": ["{rpk}"],
+  "root_threshold": 1,
+  "certs": [{{
+    "key_id": "{kid}",
+    "pubkey": "{pk}",
+    "alg": "ed25519",
+    "roles": ["catalog"],
+    "not_before": {NOW},
+    "not_after": {exp},
+    "label": "catalog key"
+  }}],
+  "thresholds": {{"catalog": 1}},
+  "revoked_keys": [],
+  "console_rp_id": "rmm.example",
+  "console_origins": ["https://rmm.example"],
+  "capability_ceiling": [],
+  "revocation_mirrors": []
+}}"#,
+        exp = NOW + 100 * DAY,
+        rpk = root.public_key,
+        kid = cat.key_id,
+        pk = cat.public_key,
+    )
+}
+
+fn catalog_definition() -> String {
+    let p =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../catalog/printing.spooler-restart.json");
+    std::fs::read_to_string(p).unwrap()
+}
+
+#[test]
+fn definition_signed_by_catalog_key_verifies() {
+    let dir = tmp();
+    let root = keygen(&dir, "root.age");
+    let cat = keygen(&dir, "cat.age");
+    let draft = write(&dir, "m.json", &catalog_manifest_json(&root, &cat));
+    let menv = dir.join("m.env");
+    ok(&sign_args("manifest", s(&draft), &backend(&root), s(&menv)));
+
+    let def = write(&dir, "d.json", &catalog_definition());
+    let denv = dir.join("d.env");
+    ok(&sign_args("definition", s(&def), &backend(&cat), s(&denv)));
+
+    let now = NOW.to_string();
+    let v = ok(&[
+        "verify",
+        "--roots",
+        &root.public_key,
+        "--root-threshold",
+        "1",
+        "--manifest",
+        s(&menv),
+        "--now",
+        &now,
+        s(&denv),
+    ]);
+    assert!(v.contains(&format!("signer: {}", cat.key_id)));
+    assert!(v.contains("printing.spooler-restart"));
+    let i = ok(&["inspect", s(&denv)]);
+    assert!(i.contains("type: rmm.definition/1"));
+
+    // The root key is not certified for the catalog role.
+    let bad = dir.join("bad.env");
+    ok(&sign_args("definition", s(&def), &backend(&root), s(&bad)));
+    let out = run(&[
+        "verify",
+        "--roots",
+        &root.public_key,
+        "--root-threshold",
+        "1",
+        "--manifest",
+        s(&menv),
+        "--now",
+        &now,
+        s(&bad),
+    ]);
+    assert!(!out.status.success());
+}
+
+#[test]
+fn definition_with_unknown_block_is_refused() {
+    let dir = tmp();
+    let cat = keygen(&dir, "cat.age");
+    let json = catalog_definition().replace("service.stop", "no.such-block");
+    assert_ne!(json, catalog_definition());
+    let def = write(&dir, "d.json", &json);
+    let denv = dir.join("d.env");
+    let out = run(&sign_args("definition", s(&def), &backend(&cat), s(&denv)));
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("validation"));
+    assert!(!denv.exists());
+}
+
+#[test]
+fn definition_with_unknown_field_is_refused() {
+    let dir = tmp();
+    let cat = keygen(&dir, "cat.age");
+    let json = catalog_definition().replacen("\"version\": 1,", "\"version\": 1, \"bogus\": 1,", 1);
+    let def = write(&dir, "d.json", &json);
+    let denv = dir.join("d.env");
+    let out = run(&sign_args("definition", s(&def), &backend(&cat), s(&denv)));
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("bogus"));
+    assert!(!denv.exists());
+}
+
+#[test]
+fn keygen_command_writes_0600_hex_seed_matching_public_key() {
+    let dir = tmp();
+    let path = dir.join("command.key");
+    let out = ok(&["keygen-command", "--out", s(&path)]);
+    let eq = |k: &str| {
+        out.lines()
+            .find_map(|l| l.strip_prefix(&format!("{k}=")))
+            .unwrap()
+            .trim()
+            .to_owned()
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+    // Load it the way rmm_api::load_command_key does: hex text, 32 bytes.
+    let text = std::fs::read_to_string(&path).unwrap();
+    let raw = hex::decode(text.trim()).unwrap();
+    let seed: [u8; 32] = raw.as_slice().try_into().unwrap();
+    let signer = rmm_trust::sign::Ed25519Signer::from_seed(&seed);
+    use rmm_trust::sign::Signer;
+    assert_eq!(hex::encode(signer.public_key().to_bytes()), eq("public"));
+    assert_eq!(hex::encode(signer.key_id().0), eq("key_id"));
+    assert!(!dir.join("command.key.tmp").exists());
+}
+
+#[test]
+fn keygen_command_refuses_to_overwrite_without_force() {
+    let dir = tmp();
+    let path = dir.join("command.key");
+    ok(&["keygen-command", "--out", s(&path)]);
+    let before = std::fs::read(&path).unwrap();
+    let out = run(&["keygen-command", "--out", s(&path)]);
+    assert!(!out.status.success());
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    ok(&["keygen-command", "--out", s(&path), "--force"]);
+    assert_ne!(std::fs::read(&path).unwrap(), before);
+}

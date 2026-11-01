@@ -1,4 +1,10 @@
 //! Command line interface and command implementations.
+//!
+//! `keygen-command` creates the server's online command key. That key is an
+//! unencrypted 32-byte Ed25519 seed (hex) protected only by file permissions
+//! (0600); it must never be used for the root, catalog or techlist roles.
+//! There is deliberately no way to export the seed of an age-encrypted root
+//! file or of a card key.
 
 use std::fs::OpenOptions;
 use std::io::{BufRead, ErrorKind, Write};
@@ -71,6 +77,19 @@ enum Cmd {
         #[arg(long)]
         out: PathBuf,
     },
+    /// Generate the server's ONLINE command key as a plain hex seed file.
+    ///
+    /// The seed is stored unencrypted and protected only by file permissions
+    /// (0600). Use it solely for the command role; never certify it for the
+    /// root, catalog or techlist roles.
+    KeygenCommand {
+        /// Output seed file (read by the API via RMM_COMMAND_KEY_FILE).
+        #[arg(long)]
+        out: PathBuf,
+        /// Overwrite --out if it exists.
+        #[arg(long)]
+        force: bool,
+    },
     /// Print the public key and key id of a backend.
     Pubkey {
         /// file:<path> | card[:<ident>]
@@ -138,6 +157,7 @@ enum Cmd {
 pub fn run() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::KeygenRoot { out } => keygen_root(&out),
+        Cmd::KeygenCommand { out, force } => keygen_command(&out, force),
         Cmd::Pubkey {
             backend,
             expect_key_id,
@@ -205,6 +225,66 @@ fn keygen_root(out: &Path) -> Result<()> {
     let signer = file_backend::generate(out, pass)?;
     eprintln!("wrote {}", out.display());
     print_key(&signer);
+    Ok(())
+}
+
+/// Create the online command key: a 32-byte seed as lowercase hex plus a
+/// newline (the format `rmm_api::load_command_key` reads), mode 0600.
+fn keygen_command(out: &Path, force: bool) -> Result<()> {
+    use zeroize::Zeroizing;
+    if out.exists() && !force {
+        return Err(FileError::Exists(out.to_owned()).into());
+    }
+    let mut seed = Zeroizing::new([0u8; 32]);
+    getrandom::getrandom(&mut seed[..]).map_err(|e| anyhow!("OS randomness unavailable: {e}"))?;
+    let signer = rmm_trust::sign::Ed25519Signer::from_seed(&seed);
+    let mut text = Zeroizing::new(hex::encode(&seed[..]));
+    text.push('\n');
+    write_secret(out, text.as_bytes(), force)?;
+    eprintln!(
+        "wrote {} (online server key: unencrypted, protected by file permissions only; \
+         command role only)",
+        out.display()
+    );
+    println!("public={}", hex::encode(signer.public_key().to_bytes()));
+    println!("key_id={}", hex::encode(signer.key_id().0));
+    Ok(())
+}
+
+/// Write secret bytes to a fresh temp file (0600 on Unix) and rename it into
+/// place, never leaving a partially written or world-readable key.
+fn write_secret(path: &Path, bytes: &[u8], force: bool) -> Result<()> {
+    let werr = |e: std::io::Error| anyhow!("cannot write {}: {e}", path.display());
+    let mut name = path.as_os_str().to_owned();
+    name.push(".tmp");
+    let tmp = PathBuf::from(name);
+    let _ = std::fs::remove_file(&tmp);
+    let mut opts = OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let res = (|| -> std::io::Result<()> {
+        let mut f = opts.open(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        if force {
+            std::fs::rename(&tmp, path)
+        } else {
+            // Atomic no-clobber: fails if `path` appeared meanwhile.
+            std::fs::hard_link(&tmp, path)?;
+            std::fs::remove_file(&tmp)
+        }
+    })();
+    if let Err(e) = res {
+        let _ = std::fs::remove_file(&tmp);
+        if e.kind() == ErrorKind::AlreadyExists {
+            return Err(FileError::Exists(path.to_owned()).into());
+        }
+        return Err(werr(e));
+    }
     Ok(())
 }
 
@@ -491,6 +571,17 @@ fn verify(
             store
                 .verify_role(&env, Role::Techlist, now)
                 .map_err(|e| anyhow!("verification failed: {e}"))?
+        }
+        DocType::Definition => {
+            let ids = store
+                .verify_role(&env, Role::Catalog, now)
+                .map_err(|e| anyhow!("verification failed: {e}"))?;
+            // Strict canonical decoding and static validation.
+            let def = rmm_recipe::definition::Definition::from_envelope_payload(&env.payload.0)
+                .map_err(|e| anyhow!("verification failed: {e}"))?;
+            rmm_recipe::validate::validate_definition(&def, rmm_recipe::validate::BLOCKS)
+                .map_err(|e| anyhow!("verification failed: {e}"))?;
+            ids
         }
         DocType::Command => {
             let ids = store

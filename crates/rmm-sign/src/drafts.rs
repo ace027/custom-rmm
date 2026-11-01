@@ -4,6 +4,8 @@
 use anyhow::{Context, Result, anyhow};
 use clap::ValueEnum;
 use rmm_proto::canonical::to_canonical_vec;
+use rmm_recipe::definition::{Definition, TYPE_DEFINITION};
+use rmm_recipe::validate::{BLOCKS, validate_definition};
 use rmm_trust::docs::{ArtifactRevocations, Command, TechnicianList, TrustManifest, decode_doc};
 use rmm_trust::envelope::{TYPE_COMMAND, TYPE_MANIFEST, TYPE_REVOCATIONS, TYPE_TECHLIST};
 use rmm_trust::error::TrustError;
@@ -21,6 +23,8 @@ pub enum DocType {
     Techlist,
     /// Command.
     Command,
+    /// Catalog action definition.
+    Definition,
 }
 
 impl DocType {
@@ -31,6 +35,7 @@ impl DocType {
             Self::Revocations => TYPE_REVOCATIONS,
             Self::Techlist => TYPE_TECHLIST,
             Self::Command => TYPE_COMMAND,
+            Self::Definition => TYPE_DEFINITION,
         }
     }
 
@@ -41,6 +46,7 @@ impl DocType {
             Self::Revocations,
             Self::Techlist,
             Self::Command,
+            Self::Definition,
         ]
         .into_iter()
         .find(|t| t.type_string() == s)
@@ -72,6 +78,24 @@ fn pretty<T: Serialize + DeserializeOwned>(payload: &[u8]) -> Result<String> {
     Ok(serde_json::to_string_pretty(&doc)?)
 }
 
+/// Parse (rejecting unknown fields), statically validate against the block
+/// registry and canonically encode an action definition.
+fn build_definition(json: &str) -> Result<Draft> {
+    let def: Definition = serde_json::from_str(json).context("invalid draft")?;
+    validate_definition(&def, BLOCKS).map_err(|e| anyhow!("draft failed validation: {e}"))?;
+    let payload = def
+        .to_canonical()
+        .map_err(|e| anyhow!("cannot encode draft: {e}"))?;
+    let pretty = pretty_definition(&payload)?;
+    Ok(Draft { payload, pretty })
+}
+
+fn pretty_definition(payload: &[u8]) -> Result<String> {
+    let def = Definition::from_envelope_payload(payload)
+        .map_err(|e| anyhow!("cannot decode payload: {e}"))?;
+    Ok(serde_json::to_string_pretty(&def)?)
+}
+
 /// Parse and validate a JSON draft and encode it canonically.
 pub fn load_draft(ty: DocType, json: &str) -> Result<Draft> {
     match ty {
@@ -79,6 +103,7 @@ pub fn load_draft(ty: DocType, json: &str) -> Result<Draft> {
         DocType::Revocations => build::<ArtifactRevocations>(json, ArtifactRevocations::validate),
         DocType::Techlist => build::<TechnicianList>(json, TechnicianList::validate),
         DocType::Command => build::<Command>(json, Command::validate),
+        DocType::Definition => build_definition(json),
     }
 }
 
@@ -89,5 +114,6 @@ pub fn pretty_payload(ty: DocType, payload: &[u8]) -> Result<String> {
         DocType::Revocations => pretty::<ArtifactRevocations>(payload),
         DocType::Techlist => pretty::<TechnicianList>(payload),
         DocType::Command => pretty::<Command>(payload),
+        DocType::Definition => pretty_definition(payload),
     }
 }

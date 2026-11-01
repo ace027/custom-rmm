@@ -14,6 +14,7 @@ card = ["dep:openpgp-card", "dep:card-backend-pcsc"]
 [dependencies]
 rmm-trust = { workspace = true, features = ["sign"] }
 rmm-proto.workspace = true
+rmm-recipe.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
