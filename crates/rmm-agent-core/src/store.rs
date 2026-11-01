@@ -1,5 +1,5 @@
-//! Encrypted local store: the outbox, the command replay cache, the persisted
-//! trust sequence floors and the trust and policy caches.
+//! Encrypted local store: the outbox, the command inbox, the command replay
+//! cache, the persisted trust sequence floors and the trust and policy caches.
 //!
 //! One SQLite file (`agent-store.db`) lives in the agent state dir. Values are
 //! sealed at the application level with XChaCha20-Poly1305 under a random
@@ -35,7 +35,9 @@ pub const MAX_OUTBOX_ROWS: u64 = 50_000;
 /// Default maximum number of stored outbox payload bytes (64 MiB).
 pub const MAX_OUTBOX_BYTES: u64 = 64 * 1024 * 1024;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
+/// Finished inbox rows older than this are pruned (the CMD stream max age).
+const INBOX_DONE_RETENTION_S: u64 = 7 * 86_400;
 const NONCE_LEN: usize = 24;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -262,6 +264,17 @@ fn migrate(conn: &mut Connection) -> Result<()> {
              PRAGMA user_version = 1;",
         )?;
     }
+    if version < 2 {
+        tx.execute_batch(
+            "CREATE TABLE inbox(
+                 cmd_id BLOB PRIMARY KEY,
+                 envelope BLOB NOT NULL,
+                 received_at INTEGER NOT NULL,
+                 state TEXT NOT NULL CHECK (state IN ('pending', 'done')));
+             CREATE INDEX inbox_pending ON inbox(state, received_at);
+             PRAGMA user_version = 2;",
+        )?;
+    }
     tx.commit()?;
     Ok(())
 }
@@ -456,6 +469,64 @@ impl Store {
             .lock()
             .query_row("SELECT COUNT(*) FROM replay", [], |r| r.get(0))?;
         u64::try_from(n).map_err(|_| StoreError::Corrupt("replay count"))
+    }
+
+    /// Record a received command envelope as pending, replacing any row with
+    /// the same `cmd_id` (a redelivery is processed again and then rejected
+    /// as a replay). Finished rows older than seven days are pruned.
+    pub fn inbox_put(&self, cmd_id: &[u8], envelope: &[u8]) -> Result<()> {
+        let blob = seal(&self.key, "inbox", cmd_id, envelope)?;
+        let now = now_secs();
+        let mut conn = self.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(
+            "DELETE FROM inbox WHERE state = 'done' AND received_at < ?1",
+            params![to_i64(now.saturating_sub(INBOX_DONE_RETENTION_S))],
+        )?;
+        tx.execute(
+            "INSERT OR REPLACE INTO inbox(cmd_id, envelope, received_at, state)
+             VALUES (?1, ?2, ?3, 'pending')",
+            params![cmd_id, blob, to_i64(now)],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The oldest pending `(cmd_id, envelope)`.
+    pub fn inbox_next_pending(&self) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
+        let row: Option<(Vec<u8>, Vec<u8>)> = self
+            .lock()
+            .query_row(
+                "SELECT cmd_id, envelope FROM inbox WHERE state = 'pending'
+                 ORDER BY received_at ASC, rowid ASC LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        row.map(|(id, blob)| {
+            let env = open(&self.key, "inbox", &id, &blob)?;
+            Ok((id, env))
+        })
+        .transpose()
+    }
+
+    /// Mark a command as finished; a missing row is fine.
+    pub fn inbox_mark_done(&self, cmd_id: &[u8]) -> Result<()> {
+        self.lock().execute(
+            "UPDATE inbox SET state = 'done' WHERE cmd_id = ?1",
+            params![cmd_id],
+        )?;
+        Ok(())
+    }
+
+    /// Number of pending inbox rows.
+    pub fn inbox_pending_len(&self) -> Result<u64> {
+        let n: i64 = self.lock().query_row(
+            "SELECT COUNT(*) FROM inbox WHERE state = 'pending'",
+            [],
+            |r| r.get(0),
+        )?;
+        u64::try_from(n).map_err(|_| StoreError::Corrupt("inbox count"))
     }
 
     /// Cache the verified trust envelope of `kind`, replacing the previous one.

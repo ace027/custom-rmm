@@ -1,7 +1,10 @@
-//! Platform-agnostic agent core: enrollment, persistent identity and the NATS
-//! transport.
+//! Platform-agnostic agent core: enrollment, persistent identity, the NATS
+//! transport, telemetry and signed command execution.
 
+pub mod blocks;
+pub mod commands;
 pub mod enroll;
+pub mod executor;
 pub mod identity;
 pub mod store;
 pub mod telemetry;

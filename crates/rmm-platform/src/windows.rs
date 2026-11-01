@@ -1,8 +1,11 @@
 use crate::keystore::validate_name;
+use crate::services::{ServiceState, Services, wait_until};
 use crate::smbios::parse_rsmb;
 use crate::{HwFacts, KeyStore, Platform, PlatformError};
 use ::windows::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_MORE_DATA, HANDLE, HLOCAL, LocalFree,
+    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_MORE_DATA, ERROR_SERVICE_ALREADY_RUNNING,
+    ERROR_SERVICE_CANNOT_ACCEPT_CTRL, ERROR_SERVICE_DOES_NOT_EXIST, ERROR_SERVICE_NOT_ACTIVE,
+    HANDLE, HLOCAL, LocalFree, WIN32_ERROR,
 };
 use ::windows::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -18,6 +21,13 @@ use ::windows::Win32::Storage::FileSystem::{
     CreateDirectoryW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
 };
 use ::windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
+use ::windows::Win32::System::Services::{
+    CloseServiceHandle, ControlService, OpenSCManagerW, OpenServiceW, QueryServiceStatusEx,
+    SC_HANDLE, SC_MANAGER_CONNECT, SC_STATUS_PROCESS_INFO, SERVICE_CONTINUE_PENDING,
+    SERVICE_CONTROL_STOP, SERVICE_PAUSE_PENDING, SERVICE_PAUSED, SERVICE_QUERY_STATUS,
+    SERVICE_RUNNING, SERVICE_START, SERVICE_START_PENDING, SERVICE_STATUS, SERVICE_STATUS_PROCESS,
+    SERVICE_STOP, SERVICE_STOP_PENDING, SERVICE_STOPPED, StartServiceW,
+};
 use ::windows::Win32::System::SystemInformation::{
     ComputerNameDnsHostname, FIRMWARE_TABLE_PROVIDER, GetComputerNameExW, GetSystemFirmwareTable,
 };
@@ -28,6 +38,7 @@ use std::fs;
 use std::io::Write;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use zeroize::Zeroizing;
 
 /// `'RSMB'`: the raw SMBIOS firmware table provider.
@@ -318,6 +329,114 @@ impl KeyStore for DpapiKeyStore {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(os_err("delete key file", e)),
         }
+    }
+}
+
+/// Closes a service-control-manager or service handle on drop.
+struct ScHandle(SC_HANDLE);
+
+impl Drop for ScHandle {
+    fn drop(&mut self) {
+        // SAFETY: the handle was opened by this module and is closed once, here.
+        let _ = unsafe { CloseServiceHandle(self.0) };
+    }
+}
+
+fn is_win32(e: &::windows::core::Error, code: WIN32_ERROR) -> bool {
+    e.code() == code.to_hresult()
+}
+
+/// Opened service, or `None` if no service has that name.
+fn open_service(name: &str, access: u32) -> Result<Option<ScHandle>, PlatformError> {
+    // SAFETY: null machine and database names select the local active
+    // database; the returned handle is closed by `ScHandle`.
+    let scm = unsafe { OpenSCManagerW(PCWSTR::null(), PCWSTR::null(), SC_MANAGER_CONNECT) }
+        .map_err(|e| os_err("open service control manager", e))?;
+    let scm = ScHandle(scm);
+    let wname: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+    // SAFETY: `scm` is a valid SCM handle and `wname` is NUL-terminated and
+    // outlives the call; the returned handle is closed by `ScHandle`.
+    match unsafe { OpenServiceW(scm.0, PCWSTR(wname.as_ptr()), access) } {
+        Ok(h) => Ok(Some(ScHandle(h))),
+        Err(e) if is_win32(&e, ERROR_SERVICE_DOES_NOT_EXIST) => Ok(None),
+        Err(e) => Err(os_err(&format!("open service {name}"), e)),
+    }
+}
+
+fn query_handle(h: &ScHandle) -> Result<ServiceState, PlatformError> {
+    let mut status = SERVICE_STATUS_PROCESS::default();
+    let mut needed = 0u32;
+    // SAFETY: the slice covers exactly the bytes of `status`, a plain
+    // repr(C) struct that lives for the whole call.
+    let buf = unsafe {
+        std::slice::from_raw_parts_mut(
+            (&raw mut status).cast::<u8>(),
+            std::mem::size_of::<SERVICE_STATUS_PROCESS>(),
+        )
+    };
+    // SAFETY: `h` is a valid service handle opened with SERVICE_QUERY_STATUS;
+    // `buf` and `needed` are valid for writes during the call.
+    unsafe { QueryServiceStatusEx(h.0, SC_STATUS_PROCESS_INFO, Some(buf), &mut needed) }
+        .map_err(|e| os_err("query service status", e))?;
+    Ok(match status.dwCurrentState {
+        SERVICE_RUNNING => ServiceState::Running,
+        SERVICE_START_PENDING | SERVICE_CONTINUE_PENDING => ServiceState::StartPending,
+        SERVICE_STOP_PENDING | SERVICE_PAUSE_PENDING => ServiceState::StopPending,
+        SERVICE_STOPPED | SERVICE_PAUSED => ServiceState::Stopped,
+        _ => ServiceState::Stopped,
+    })
+}
+
+fn missing(name: &str) -> PlatformError {
+    PlatformError::Os(format!("service {name} does not exist"))
+}
+
+/// Windows Service Control Manager. Handles are opened per call.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ScmServices;
+
+impl Services for ScmServices {
+    fn query(&self, name: &str) -> Result<ServiceState, PlatformError> {
+        match open_service(name, SERVICE_QUERY_STATUS)? {
+            Some(h) => query_handle(&h),
+            None => Ok(ServiceState::Missing),
+        }
+    }
+
+    fn stop(&self, name: &str, timeout: Duration) -> Result<(), PlatformError> {
+        let h = open_service(name, SERVICE_QUERY_STATUS | SERVICE_STOP)?
+            .ok_or_else(|| missing(name))?;
+        if query_handle(&h)? != ServiceState::Stopped {
+            let mut status = SERVICE_STATUS::default();
+            // SAFETY: `h` was opened with SERVICE_STOP and `status` is a valid
+            // out pointer for the call.
+            match unsafe { ControlService(h.0, SERVICE_CONTROL_STOP, &mut status) } {
+                Ok(()) => {}
+                // Already stopped, or a stop/start is in progress: just wait.
+                Err(e)
+                    if is_win32(&e, ERROR_SERVICE_NOT_ACTIVE)
+                        || is_win32(&e, ERROR_SERVICE_CANNOT_ACCEPT_CTRL) => {}
+                Err(e) => return Err(os_err(&format!("stop service {name}"), e)),
+            }
+        }
+        wait_until(self, name, ServiceState::Stopped, timeout)
+    }
+
+    fn start(&self, name: &str, timeout: Duration) -> Result<(), PlatformError> {
+        let h = open_service(name, SERVICE_QUERY_STATUS | SERVICE_START)?
+            .ok_or_else(|| missing(name))?;
+        if query_handle(&h)? == ServiceState::StopPending {
+            wait_until(self, name, ServiceState::Stopped, timeout)?;
+        }
+        if query_handle(&h)? != ServiceState::Running {
+            // SAFETY: `h` was opened with SERVICE_START; no arguments are passed.
+            match unsafe { StartServiceW(h.0, None) } {
+                Ok(()) => {}
+                Err(e) if is_win32(&e, ERROR_SERVICE_ALREADY_RUNNING) => {}
+                Err(e) => return Err(os_err(&format!("start service {name}"), e)),
+            }
+        }
+        wait_until(self, name, ServiceState::Running, timeout)
     }
 }
 

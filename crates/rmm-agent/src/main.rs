@@ -5,6 +5,8 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
+use rmm_agent_core::blocks::PlatformBlocks;
+use rmm_agent_core::commands::{self, Agent, IntakeOptions};
 use rmm_agent_core::enroll::{self, EnrollError, EnrollOptions};
 use rmm_agent_core::identity;
 use rmm_agent_core::store::{STORE_KEY_FILE, Store};
@@ -149,6 +151,17 @@ async fn run(state_dir: Option<PathBuf>, once: bool) -> u8 {
             }
         }
     };
+    // The result signer keeps its own (zeroizing) copy of the seed.
+    let agent = match &store {
+        Some(_) => match Agent::from_identity(&ident, seed) {
+            Ok(a) => Some(Arc::new(a)),
+            Err(e) => {
+                tracing::error!("command trust roots: {e}");
+                return EXIT_FAILURE;
+            }
+        },
+        None => None,
+    };
     let reconnect = Arc::new(Notify::new());
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let ca = extra_ca();
@@ -163,6 +176,19 @@ async fn run(state_dir: Option<PathBuf>, once: bool) -> u8 {
     };
     tracing::info!(agent_id = %ident.agent_id, url = %ident.nats_url, "connecting");
     let shutdown = CancellationToken::new();
+    // Results share the telemetry outbox; `reconnect` doubles as the drain
+    // task's wake-up so a queued result is sent at once.
+    let intake_task = store.clone().zip(agent).map(|(store, agent)| {
+        let client = client.clone();
+        let ident = ident.clone();
+        let opts = IntakeOptions {
+            agent,
+            blocks: Arc::new(PlatformBlocks::for_agent(&dir)),
+            outbox_wake: Arc::clone(&reconnect),
+            shutdown: shutdown.clone(),
+        };
+        tokio::spawn(async move { commands::intake(client, &ident, store, opts).await })
+    });
     let telemetry_task = store.map(|store| {
         let client = client.clone();
         let ident = ident.clone();
@@ -208,6 +234,9 @@ async fn run(state_dir: Option<PathBuf>, once: bool) -> u8 {
         }
     };
     shutdown.cancel();
+    if let Some(task) = intake_task {
+        let _ = task.await;
+    }
     if let Some(task) = telemetry_task {
         let _ = task.await;
     }
