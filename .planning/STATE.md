@@ -1,8 +1,8 @@
 # Project State
 
 ## Current Position
-- **Phase**: 9 of 9 (executing)
-- **Status**: Phase 9 executing — Plan 09-02 failed
+- **Phase**: 9 of 9 (partial — 1 plan(s) failed)
+- **Status**: Phase 9 partial — 09-02 failed, stopped after wave 2, review needed
 - **Last Activity**: Plan 09-02 execution (2026-11-01)
 
 ## Progress
@@ -29,7 +29,7 @@
 - rmm-sign extended (user-approved quick task): `definition` doc type (validated with rmm-recipe, catalog role) and `keygen-command` for the online server command key (0600 seed file; no seed export for root, catalog or card keys)
 
 ## Next Action
-Run `/triad:build` to execute Phase 9: MSI packaging
+Fix the failed plans and run `/triad:build` again (completed plans are kept), or run `/triad:review`
 
 ## Phase 1 Results
 (build started 2026-10-31)
