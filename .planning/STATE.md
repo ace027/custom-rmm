@@ -1,13 +1,13 @@
 # Project State
 
 ## Current Position
-- **Phase**: 7 of 9 (partial — 1 plan(s) failed)
-- **Status**: Phase 7 partial — 07-04 failed, stopped after wave 3, review needed
+- **Phase**: 7 of 9 (executing)
+- **Status**: Phase 7 executing — Plan 07-04 complete
 - **Last Activity**: Plan 07-04 execution (2026-11-01)
 
 ## Progress
 ```
-[################....] 80% — 24/30 plans complete
+[################....] 83% — 25/30 plans complete
 ```
 
 ## Recent Decisions
@@ -92,3 +92,4 @@ Fix the failed plans and run `/triad:build` again (completed plans are kept), or
 - Plan 07-02 (Wave 2): Hardware-only WebAuthn registration, shell tables and techlist allowlist — Complete with Warnings
 - Plan 07-03 (Wave 2): Agent shell: co-sign verification, ConPTY session pump and lockout — Complete
 - Plan 07-04 (Wave 3): Grant API, browser relay, recordings and end-to-end shell — PARTIAL: Grant/open endpoints, relay, recordings with retention, NATS/compose config, fake authenticator and e2e script are written. The Rust-side verification passes, but scripts/e2e-shell.sh has not complete
+- Plan 07-04 (Wave 3): Grant API, browser relay, recordings and end-to-end shell — Complete with Warnings
