@@ -3133,6 +3133,7 @@ dependencies = [
  "hex",
  "openpgp-card",
  "rmm-proto",
+ "rmm-recipe",
  "rmm-trust",
  "rpassword",
  "serde",
