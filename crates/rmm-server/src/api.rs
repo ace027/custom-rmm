@@ -78,5 +78,12 @@ pub async fn build_router() -> Result<Router> {
         retention_days,
     ));
 
+    // Agents fetch the latest trust documents and release over NATS.
+    tracing::info!(dir = %state.artifact_dir.display(), "release artifacts");
+    rmm_api::artifacts::sweep_stale(&state.artifact_dir);
+    if rmm_api::distribution::spawn(&state).is_none() {
+        tracing::warn!("no NATS client; trust and release distribution is disabled");
+    }
+
     Ok(rmm_api::router(state))
 }

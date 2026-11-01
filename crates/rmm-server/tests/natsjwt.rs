@@ -97,6 +97,7 @@ fn user_claims_contain_exactly_the_agent_subjects() {
             format!("result.{c}.{id}"),
             format!("shell.{id}.*.out"),
             "svc.trust.latest".to_owned(),
+            "svc.release.latest".to_owned(),
             format!("$JS.API.CONSUMER.INFO.CMD.agent_{id}"),
             format!("$JS.API.CONSUMER.MSG.NEXT.CMD.agent_{id}"),
             format!("$JS.ACK.CMD.agent_{id}.>"),

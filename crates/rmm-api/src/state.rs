@@ -149,10 +149,15 @@ pub struct AppState {
     pub attestation: Option<Arc<AttestationConfig>>,
     /// Directory holding shell session recordings (`RMM_RECORDING_DIR`).
     pub recording_dir: PathBuf,
+    /// Directory holding release artifacts, one file per SHA-256
+    /// (`RMM_ARTIFACT_DIR`).
+    pub artifact_dir: PathBuf,
 }
 
 /// Default for `RMM_RECORDING_DIR`.
 pub const DEFAULT_RECORDING_DIR: &str = "/var/lib/rmm/recordings";
+/// Default for `RMM_ARTIFACT_DIR`.
+pub const DEFAULT_ARTIFACT_DIR: &str = "/var/lib/rmm/artifacts";
 
 impl AppState {
     /// Build the state with the default enrollment rate limit. WebAuthn
@@ -179,7 +184,17 @@ impl AppState {
             recording_dir: std::env::var_os("RMM_RECORDING_DIR")
                 .filter(|v| !v.is_empty())
                 .map_or_else(|| PathBuf::from(DEFAULT_RECORDING_DIR), PathBuf::from),
+            artifact_dir: std::env::var_os("RMM_ARTIFACT_DIR")
+                .filter(|v| !v.is_empty())
+                .map_or_else(|| PathBuf::from(DEFAULT_ARTIFACT_DIR), PathBuf::from),
         }
+    }
+
+    /// Set the directory release artifacts are stored in.
+    #[must_use]
+    pub fn with_artifact_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.artifact_dir = dir.into();
+        self
     }
 
     /// Set (or clear) the WebAuthn attestation configuration.

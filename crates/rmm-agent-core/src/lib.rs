@@ -1,11 +1,13 @@
 //! Platform-agnostic agent core: enrollment, persistent identity, the NATS
-//! transport, telemetry, signed command execution and co-signed shells.
+//! transport, telemetry, signed command execution, co-signed shells and the
+//! periodic trust and release refresh.
 
 pub mod blocks;
 pub mod commands;
 pub mod enroll;
 pub mod executor;
 pub mod identity;
+pub mod refresh;
 pub mod shell;
 pub mod shell_verify;
 pub mod store;

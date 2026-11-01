@@ -77,6 +77,87 @@
         ]
       }
     },
+    "/api/v1/admin/artifacts": {
+      "post": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Upload a release artifact; the server names it by its SHA-256.",
+        "operationId": "upload_artifact",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Artifact stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Empty or interrupted upload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing RMM.Admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Larger than 256 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/techlist-draft": {
       "get": {
         "tags": [
@@ -1089,13 +1170,13 @@
         "tags": [
           "admin"
         ],
-        "summary": "Upload a signed trust artifact.",
+        "summary": "Upload a signed trust artifact (a release manifest is `release`).",
         "operationId": "put_trust",
         "parameters": [
           {
             "name": "kind",
             "in": "path",
-            "description": "manifest, revocations or techlist",
+            "description": "manifest, revocations, techlist or release",
             "required": true,
             "schema": {
               "type": "string"
@@ -1181,6 +1262,53 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/artifacts/{sha256_hex}": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Download an artifact by its SHA-256 (no authentication: the hash is signed).",
+        "operationId": "download_artifact",
+        "parameters": [
+          {
+            "name": "sha256_hex",
+            "in": "path",
+            "description": "Lowercase hex SHA-256",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The artifact bytes",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such artifact",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -1704,6 +1832,26 @@
           "cred_id_b64url": {
             "type": "string",
             "description": "Credential id, unpadded base64url."
+          }
+        }
+      },
+      "UploadResponse": {
+        "type": "object",
+        "description": "Result of a stored upload.",
+        "required": [
+          "sha256_hex",
+          "size"
+        ],
+        "properties": {
+          "sha256_hex": {
+            "type": "string",
+            "description": "Lowercase hex SHA-256 computed by the server; the artifact's name."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size in bytes.",
+            "minimum": 0
           }
         }
       }

@@ -849,3 +849,111 @@ fn techlist_needs_hardware_credentials() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("only applies to --type techlist"));
 }
+
+fn release_manifest_json(root: &Key, rel: &Key, cat: &Key) -> String {
+    format!(
+        r#"{{
+  "seq": 1,
+  "issued_at": {NOW},
+  "expires_at": {exp},
+  "root_keys": ["{rpk}"],
+  "root_threshold": 1,
+  "certs": [
+    {{"key_id": "{rid}", "pubkey": "{rp}", "alg": "ed25519", "roles": ["release"],
+      "not_before": {NOW}, "not_after": {exp}, "label": "release key"}},
+    {{"key_id": "{cid}", "pubkey": "{cp}", "alg": "ed25519", "roles": ["catalog"],
+      "not_before": {NOW}, "not_after": {exp}, "label": "catalog key"}}
+  ],
+  "thresholds": {{"release": 1, "catalog": 1}},
+  "revoked_keys": [],
+  "console_rp_id": "rmm.example",
+  "console_origins": ["https://rmm.example"],
+  "capability_ceiling": [],
+  "revocation_mirrors": []
+}}"#,
+        exp = NOW + 100 * DAY,
+        rpk = root.public_key,
+        rid = rel.key_id,
+        rp = rel.public_key,
+        cid = cat.key_id,
+        cp = cat.public_key,
+    )
+}
+
+fn release_json(sha_hex: &str) -> String {
+    format!(
+        r#"{{
+  "seq": 1,
+  "version": "1.2.3",
+  "issued_at": {NOW},
+  "expires_at": {exp},
+  "artifacts": [
+    {{"platform": "linux-x86_64", "sha256": "{sha_hex}", "size": 4096, "name": "rmm-agent"}}
+  ]
+}}"#,
+        exp = NOW + 30 * DAY
+    )
+}
+
+#[test]
+fn release_signed_by_release_key_verifies_and_other_roles_fail() {
+    let dir = tmp();
+    let root = keygen(&dir, "root.age");
+    let rel = keygen(&dir, "rel.age");
+    let cat = keygen(&dir, "cat.age");
+    let draft = write(&dir, "m.json", &release_manifest_json(&root, &rel, &cat));
+    let menv = dir.join("m.env");
+    ok(&sign_args("manifest", s(&draft), &backend(&root), s(&menv)));
+
+    let sha = "ab".repeat(32);
+    let rdraft = write(&dir, "r.json", &release_json(&sha));
+    let renv = dir.join("r.env");
+    ok(&sign_args("release", s(&rdraft), &backend(&rel), s(&renv)));
+
+    let now = NOW.to_string();
+    let verify_args = |file: &Path| {
+        run(&[
+            "verify",
+            "--roots",
+            &root.public_key,
+            "--root-threshold",
+            "1",
+            "--manifest",
+            s(&menv),
+            "--now",
+            &now,
+            s(file),
+        ])
+    };
+    let out = verify_args(&renv);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = String::from_utf8(out.stdout).unwrap();
+    assert!(v.contains(&format!("signer: {}", rel.key_id)));
+    assert!(v.contains(&sha));
+    let i = ok(&["inspect", s(&renv)]);
+    assert!(i.contains("type: rmm.release/1"));
+
+    // A catalog-role key signs successfully but does not verify as a release.
+    let bad = dir.join("bad.env");
+    ok(&sign_args("release", s(&rdraft), &backend(&cat), s(&bad)));
+    assert!(!verify_args(&bad).status.success());
+}
+
+#[test]
+fn release_draft_with_bad_hash_is_refused() {
+    let dir = tmp();
+    let rel = keygen(&dir, "rel.age");
+    let short = write(&dir, "r.json", &release_json(&"ab".repeat(31)));
+    let out = run(&sign_args(
+        "release",
+        s(&short),
+        &backend(&rel),
+        s(&dir.join("r.env")),
+    ));
+    assert!(!out.status.success());
+    assert!(!dir.join("r.env").exists());
+}

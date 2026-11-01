@@ -12,8 +12,9 @@ use axum::response::{IntoResponse, Response};
 use rand::TryRng;
 use rmm_db::repo::{self, NewToken};
 use rmm_db::scope::{Scope, begin_scoped};
-use rmm_trust::docs::{Command, CommandBody};
+use rmm_trust::docs::{Command, CommandBody, verify_release};
 use rmm_trust::envelope::Envelope;
+use rmm_trust::error::TrustError;
 use rmm_trust::keys::Bytes as KeyBytes;
 use rmm_trust::keys::PublicKey;
 use rmm_trust::store::{Clock, DocKind, SeqStore, TrustStore};
@@ -370,11 +371,11 @@ fn apply(
     }
 }
 
-/// Upload a signed trust artifact.
+/// Upload a signed trust artifact (a release manifest is `release`).
 #[utoipa::path(
     put,
     path = "/api/v1/trust/{kind}",
-    params(("kind" = String, Path, description = "manifest, revocations or techlist")),
+    params(("kind" = String, Path, description = "manifest, revocations, techlist or release")),
     request_body(content = Vec<u8>, content_type = "application/octet-stream"),
     security(("bearer" = [])),
     responses(
@@ -391,7 +392,14 @@ pub async fn put_trust(
     Path(kind): Path<String>,
     body: Bytes,
 ) -> Result<StatusCode, ApiError> {
-    let doc_kind = parse_kind(&kind).ok_or_else(|| ApiError::NotFound("unknown kind".into()))?;
+    // `release` has no `DocKind`: it is verified with `verify_release` under
+    // the stored manifest and sequenced against the stored releases.
+    let is_release = kind == "release";
+    let doc_kind = if is_release {
+        None
+    } else {
+        Some(parse_kind(&kind).ok_or_else(|| ApiError::NotFound("unknown kind".into()))?)
+    };
     let roots = state
         .roots
         .keys
@@ -418,18 +426,50 @@ pub async fn put_trust(
         }
     }
 
-    apply(&mut store, doc_kind, &body, &mut seqs)
-        .map_err(|e| ApiError::Unprocessable(e.to_string()))?;
-    let seq = match doc_kind {
-        DocKind::Manifest => store.manifest().map(|d| d.seq),
-        DocKind::Revocations => store.revocations().map(|d| d.seq),
-        DocKind::Techlist => store.techlist().map(|d| d.seq),
-    }
-    .ok_or(ApiError::Internal)?;
+    let (seq, content_id) = match doc_kind {
+        Some(doc_kind) => {
+            apply(&mut store, doc_kind, &body, &mut seqs)
+                .map_err(|e| ApiError::Unprocessable(e.to_string()))?;
+            let seq = match doc_kind {
+                DocKind::Manifest => store.manifest().map(|d| d.seq),
+                DocKind::Revocations => store.revocations().map(|d| d.seq),
+                DocKind::Techlist => store.techlist().map(|d| d.seq),
+            }
+            .ok_or(ApiError::Internal)?;
+            let envelope =
+                Envelope::from_bytes(&body).map_err(|e| ApiError::Unprocessable(e.to_string()))?;
+            (seq, envelope.content_id())
+        }
+        None => {
+            let (envelope, doc) = verify_release(&store, &body, SystemClock.now())
+                .map_err(|e| ApiError::Unprocessable(e.to_string()))?;
+            let content_id = envelope.content_id();
+            // Same sequence rules as the other kinds: never below the newest
+            // stored release, and the same sequence only with the same content.
+            if let Some((_, stored_seq, stored_env)) =
+                stored.iter().find(|(k, _, _)| k == "release")
+            {
+                let stored_seq = u64::try_from(*stored_seq).unwrap_or(u64::MAX);
+                let same =
+                    Envelope::from_bytes(stored_env).is_ok_and(|e| e.content_id() == content_id);
+                let err = if doc.seq < stored_seq {
+                    Some(TrustError::Rollback {
+                        stored: stored_seq,
+                        got: doc.seq,
+                    })
+                } else if doc.seq == stored_seq && !same {
+                    Some(TrustError::Equivocation)
+                } else {
+                    None
+                };
+                if let Some(err) = err {
+                    return Err(ApiError::Unprocessable(err.to_string()));
+                }
+            }
+            (doc.seq, content_id)
+        }
+    };
     let seq = i64::try_from(seq).map_err(|_| ApiError::Unprocessable("seq out of range".into()))?;
-    let envelope =
-        Envelope::from_bytes(&body).map_err(|e| ApiError::Unprocessable(e.to_string()))?;
-    let content_id = envelope.content_id();
 
     let inserted =
         repo::put_trust_artifact(&mut tx, &kind, seq, &content_id, &body, &actor).await?;
@@ -443,13 +483,14 @@ pub async fn put_trust(
         &detail,
     )
     .await?;
-    let agents = if inserted {
+    let agents = if inserted && doc_kind.is_some() {
         active_agents(&mut tx).await?
     } else {
         Vec::new()
     };
     tx.commit().await?;
-    if inserted {
+    // Releases are not pushed: agents fetch them with `svc.release.latest`.
+    if inserted && let Some(doc_kind) = doc_kind {
         push_trust_update(&state, doc_kind, &body, &agents).await;
     }
     Ok(StatusCode::NO_CONTENT)

@@ -603,6 +603,14 @@ fn verify(
                 .map_err(|e| anyhow!("verification failed: {e}"))?;
             ids
         }
+        DocType::Release => {
+            // Role, strict canonical decoding, validation and time window.
+            rmm_trust::docs::verify_release(&store, &target, now)
+                .map_err(|e| anyhow!("verification failed: {e}"))?;
+            store
+                .verify_role(&env, Role::Release, now)
+                .map_err(|e| anyhow!("verification failed: {e}"))?
+        }
         DocType::Command => {
             let ids = store
                 .verify_role(&env, Role::Command, now)

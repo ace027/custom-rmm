@@ -11,9 +11,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use rmm_proto::canonical::{from_canonical_slice, to_canonical_vec};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use crate::envelope::ALG_ED25519;
+use crate::envelope::{ALG_ED25519, Envelope, TYPE_RELEASE};
 use crate::error::TrustError;
 use crate::keys::{Bytes, KeyId, PublicKey};
+use crate::store::{MAX_SIGS, TrustStore};
 
 /// Clock skew tolerance in seconds.
 pub const SKEW_SECS: u64 = 300;
@@ -27,6 +28,10 @@ pub const MAX_REVOCATIONS_WINDOW: u64 = 60 * DAY_SECS;
 pub const MAX_COMMAND_TTL: u64 = 7 * DAY_SECS;
 /// Longest shell session a grant may allow.
 pub const MAX_SHELL_DURATION: u32 = 4 * 3600;
+/// Largest artifact a release may carry (256 MiB).
+pub const MAX_ARTIFACT_SIZE: u64 = 268_435_456;
+/// Longest validity window of a release manifest.
+pub const MAX_RELEASE_WINDOW: u64 = 400 * DAY_SECS;
 /// COSE algorithm identifier for ES256.
 pub const COSE_ES256: i32 = -7;
 /// COSE algorithm identifier for EdDSA.
@@ -263,6 +268,37 @@ pub struct Credential {
     pub aaguid: Bytes,
 }
 
+/// Signed description of one agent release: the version and, per platform,
+/// the content hash of the artifact to install.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReleaseManifest {
+    /// Strictly increasing sequence number.
+    pub seq: u64,
+    /// Semantic version of the release.
+    pub version: String,
+    /// Issue time.
+    pub issued_at: u64,
+    /// Expiry time (exclusive).
+    pub expires_at: u64,
+    /// One artifact per platform.
+    pub artifacts: Vec<ReleaseArtifact>,
+}
+
+/// One downloadable artifact of a release.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReleaseArtifact {
+    /// Platform, for example `windows-x86_64` or `linux-x86_64`.
+    pub platform: String,
+    /// SHA-256 of the artifact (32 bytes).
+    pub sha256: Bytes,
+    /// Size in bytes (1..=256 MiB).
+    pub size: u64,
+    /// File name of the artifact.
+    pub name: String,
+}
+
 fn invalid(msg: &str) -> TrustError {
     TrustError::InvalidDocument(msg.to_owned())
 }
@@ -283,6 +319,39 @@ fn check_window(issued_at: u64, expires_at: u64, max: u64) -> Result<(), TrustEr
         return Err(invalid("validity window too long"));
     }
     Ok(())
+}
+
+/// Whether `s` is a semantic version (semver.org 2.0.0): `MAJOR.MINOR.PATCH`
+/// without leading zeros, an optional `-prerelease` and an optional `+build`.
+pub fn is_semver(s: &str) -> bool {
+    fn numeric(p: &str) -> bool {
+        !p.is_empty()
+            && p.bytes().all(|b| b.is_ascii_digit())
+            && (p.len() == 1 || !p.starts_with('0'))
+    }
+    fn idents(part: &str, prerelease: bool) -> bool {
+        part.split('.').all(|id| {
+            !id.is_empty()
+                && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                && (!prerelease
+                    || !id.bytes().all(|b| b.is_ascii_digit())
+                    || id.len() == 1
+                    || !id.starts_with('0'))
+        })
+    }
+    let (rest, build) = match s.split_once('+') {
+        Some((r, b)) => (r, Some(b)),
+        None => (s, None),
+    };
+    let (core, pre) = match rest.split_once('-') {
+        Some((c, p)) => (c, Some(p)),
+        None => (rest, None),
+    };
+    let nums: Vec<&str> = core.split('.').collect();
+    nums.len() == 3
+        && nums.iter().all(|n| numeric(n))
+        && pre.is_none_or(|p| idents(p, true))
+        && build.is_none_or(|b| idents(b, false))
 }
 
 /// Strictly decode a document payload. The payload must be canonical CBOR
@@ -431,4 +500,93 @@ impl TechnicianList {
     pub fn tech(&self, tech_id: &str) -> Option<&Technician> {
         self.techs.iter().find(|t| t.tech_id == tech_id)
     }
+}
+
+impl ReleaseManifest {
+    /// Structural validation.
+    pub fn validate(&self) -> Result<(), TrustError> {
+        check_window(self.issued_at, self.expires_at, MAX_RELEASE_WINDOW)?;
+        if !is_semver(&self.version) {
+            return Err(invalid("version is not a semantic version"));
+        }
+        if self.artifacts.is_empty() {
+            return Err(invalid("a release needs at least one artifact"));
+        }
+        let mut platforms = BTreeSet::new();
+        for a in &self.artifacts {
+            if a.platform.is_empty() {
+                return Err(invalid("platform must not be empty"));
+            }
+            if !platforms.insert(a.platform.as_str()) {
+                return Err(invalid("duplicate platform"));
+            }
+            if a.sha256.0.len() != 32 {
+                return Err(invalid("sha256 must be 32 bytes"));
+            }
+            if a.size == 0 || a.size > MAX_ARTIFACT_SIZE {
+                return Err(invalid("artifact size out of range"));
+            }
+            if a.name.is_empty() || a.name.contains(['/', '\\']) || a.name.starts_with('.') {
+                return Err(invalid("artifact name must be a plain file name"));
+            }
+        }
+        Ok(())
+    }
+
+    /// The artifact for `platform`, if any.
+    pub fn artifact_for(&self, platform: &str) -> Option<&ReleaseArtifact> {
+        self.artifacts.iter().find(|a| a.platform == platform)
+    }
+}
+
+/// Verify a release envelope against the installed manifest: type, a
+/// `release` role signature threshold, canonical payload, structure and time
+/// window. The sequence floor is the caller's concern.
+pub fn verify_release(
+    store: &TrustStore,
+    env_bytes: &[u8],
+    now: u64,
+) -> Result<(Envelope, ReleaseManifest), TrustError> {
+    let env = Envelope::from_bytes(env_bytes)?;
+    if env.r#type != TYPE_RELEASE {
+        return Err(TrustError::WrongType);
+    }
+    if env.sigs.len() > MAX_SIGS {
+        return Err(invalid("too many signatures"));
+    }
+    store.verify_role(&env, Role::Release, now)?;
+    let doc: ReleaseManifest = decode_doc(&env.payload.0)?;
+    doc.validate()?;
+    if doc.issued_at > now.saturating_add(SKEW_SECS) {
+        return Err(TrustError::NotYetValid);
+    }
+    if now >= doc.expires_at {
+        return Err(TrustError::Expired);
+    }
+    Ok((env, doc))
+}
+
+/// Reply to `svc.trust.latest`: the newest stored envelope of each trust
+/// document kind, if any (CBOR map; absent keys mean none stored).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrustLatest {
+    /// Latest manifest envelope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest: Option<Bytes>,
+    /// Latest revocations envelope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revocations: Option<Bytes>,
+    /// Latest technician list envelope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub techlist: Option<Bytes>,
+}
+
+/// Reply to `svc.release.latest`: the newest stored release envelope, if any.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReleaseLatest {
+    /// Latest release envelope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release: Option<Bytes>,
 }

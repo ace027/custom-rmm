@@ -201,7 +201,7 @@ pub struct Verified {
     pub content_id: [u8; 32],
 }
 
-fn trust_reason(e: &TrustError) -> RejectReason {
+pub(crate) fn trust_reason(e: &TrustError) -> RejectReason {
     match e {
         TrustError::Expired | TrustError::NotYetValid => RejectReason::Expired,
         TrustError::Replay => RejectReason::Replay,
@@ -229,7 +229,7 @@ fn version_key(v: &str) -> Option<(u64, u64, u64, bool)> {
     Some((ma, mi, pa, pre.is_none()))
 }
 
-fn reject<T>(reason: RejectReason, why: impl fmt::Display) -> Result<T, RejectReason> {
+pub(crate) fn reject<T>(reason: RejectReason, why: impl fmt::Display) -> Result<T, RejectReason> {
     tracing::warn!(?reason, "command rejected: {why}");
     Err(reason)
 }
@@ -360,8 +360,8 @@ pub struct Agent {
     /// Agent version checked against `min_agent_version`.
     pub version: String,
     seed: Zeroizing<[u8; 32]>,
-    roots: Vec<PublicKey>,
-    threshold: u8,
+    pub(crate) roots: Vec<PublicKey>,
+    pub(crate) threshold: u8,
 }
 
 impl fmt::Debug for Agent {
@@ -477,7 +477,12 @@ pub fn handle_with(
                 (DocKind::Revocations, revocations),
                 (DocKind::Techlist, techlist),
             ];
-            match trust_update(trust, &docs, store, clock, shell) {
+            let on_techlist = |list: &TechnicianList| {
+                if let Some(m) = shell {
+                    m.on_techlist(list);
+                }
+            };
+            match trust_update(trust, &docs, store, clock, &on_techlist) {
                 Ok(()) => finished(&command, agent, Vec::new()),
                 Err(reason) => rejected(reason),
             }
@@ -603,14 +608,15 @@ fn shell_open(
 /// Apply the documents of a `TrustUpdate` (manifest, then revocations, then
 /// technician list), each through the verifying [`TrustStore`] (signer role,
 /// threshold, time and a sequence number not below the persisted floor)
-/// before it replaces the cached envelope. Open shells are then re-checked
-/// against the resulting technician list.
-fn trust_update(
+/// before it replaces the cached envelope. `on_techlist` is then called with
+/// the resulting technician list so open shells are re-checked against it.
+/// Shared by the `TrustUpdate` command and the periodic refresh.
+pub(crate) fn trust_update(
     mut trust: TrustStore,
     docs: &[(DocKind, &Option<Bytes>)],
     store: &Store,
     clock: &dyn Clock,
-    shell: Option<&ShellManager>,
+    on_techlist: &dyn Fn(&TechnicianList),
 ) -> Result<(), RejectReason> {
     let mut outcome = Ok(());
     for (kind, doc) in docs {
@@ -638,16 +644,14 @@ fn trust_update(
         }
         tracing::info!(?kind, "trust document updated");
     }
-    if let Some(m) = shell {
-        match trust.techlist() {
-            Some(list) => m.on_techlist(list),
-            None => m.on_techlist(&TechnicianList {
-                seq: 0,
-                issued_at: 0,
-                expires_at: 0,
-                techs: Vec::new(),
-            }),
-        }
+    match trust.techlist() {
+        Some(list) => on_techlist(list),
+        None => on_techlist(&TechnicianList {
+            seq: 0,
+            issued_at: 0,
+            expires_at: 0,
+            techs: Vec::new(),
+        }),
     }
     outcome
 }

@@ -2,8 +2,10 @@
 
 pub mod actions;
 pub mod admin;
+pub mod artifacts;
 pub mod attestation;
 pub mod auth;
+pub mod distribution;
 pub mod enroll;
 pub mod recording;
 pub mod relay;
@@ -11,6 +13,7 @@ pub mod shell;
 pub mod state;
 pub mod technicians;
 
+use axum::extract::DefaultBodyLimit;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
@@ -52,6 +55,8 @@ pub enum ApiError {
     Gone(String),
     /// 422.
     Unprocessable(String),
+    /// 413.
+    PayloadTooLarge(String),
     /// 429.
     TooManyRequests,
     /// 503.
@@ -88,6 +93,7 @@ impl IntoResponse for ApiError {
             Self::NotFound(m) => (StatusCode::NOT_FOUND, m),
             Self::Conflict(m) => (StatusCode::CONFLICT, m),
             Self::Gone(m) => (StatusCode::GONE, m),
+            Self::PayloadTooLarge(m) => (StatusCode::PAYLOAD_TOO_LARGE, m),
             Self::Unprocessable(m) => (StatusCode::UNPROCESSABLE_ENTITY, m),
             Self::Unavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, m),
             Self::TooManyRequests => (StatusCode::TOO_MANY_REQUESTS, "rate limited".to_string()),
@@ -141,6 +147,8 @@ impl Modify for BearerAuth {
         admin::approve_device,
         admin::reject_device,
         admin::put_trust,
+        artifacts::upload_artifact,
+        artifacts::download_artifact,
         actions::put_catalog,
         actions::issue_action,
         actions::get_action_run,
@@ -157,6 +165,7 @@ impl Modify for BearerAuth {
         ErrorBody,
         admin::CreateTokenRequest,
         admin::CreateTokenResponse,
+        artifacts::UploadResponse,
         actions::CatalogEntry,
         actions::IssueRequest,
         actions::IssueResponse,
@@ -201,6 +210,14 @@ pub fn router(state: AppState) -> Router {
             post(admin::reject_device),
         )
         .route("/api/v1/trust/{kind}", put(admin::put_trust))
+        .route(
+            "/api/v1/admin/artifacts",
+            post(artifacts::upload_artifact).layer(DefaultBodyLimit::max(artifacts::BODY_LIMIT)),
+        )
+        .route(
+            "/v1/artifacts/{sha256_hex}",
+            get(artifacts::download_artifact),
+        )
         .route("/api/v1/catalog", put(actions::put_catalog))
         .route(
             "/api/v1/agents/{agent_id}/actions",
@@ -257,6 +274,8 @@ mod tests {
             "/api/v1/devices/{device_id}/approve",
             "/api/v1/devices/{device_id}/reject",
             "/api/v1/trust/{kind}",
+            "/api/v1/admin/artifacts",
+            "/v1/artifacts/{sha256_hex}",
             "/api/v1/catalog",
             "/api/v1/agents/{agent_id}/actions",
             "/api/v1/action-runs/{cmd_id}",

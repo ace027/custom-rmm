@@ -9,6 +9,7 @@ use rmm_agent_core::blocks::PlatformBlocks;
 use rmm_agent_core::commands::{self, Agent, IntakeOptions};
 use rmm_agent_core::enroll::{self, EnrollError, EnrollOptions};
 use rmm_agent_core::identity;
+use rmm_agent_core::refresh::{self, REFRESH_INTERVAL, RefreshOptions};
 use rmm_agent_core::shell::{Indicator, SessionConfig, ShellLink, ShellManager};
 use rmm_agent_core::store::{STORE_KEY_FILE, Store};
 use rmm_agent_core::telemetry::{self as agent_telemetry, CancellationToken, Intervals};
@@ -180,19 +181,39 @@ async fn run(state_dir: Option<PathBuf>, once: bool) -> u8 {
     let shutdown = CancellationToken::new();
     // Results share the telemetry outbox; `reconnect` doubles as the drain
     // task's wake-up so a queued result is sent at once.
-    let intake_task = store.clone().zip(agent).map(|(store, agent)| {
-        let client = client.clone();
-        let ident = ident.clone();
-        let shell = shell_manager(&agent.agent_id, &client);
-        let opts = IntakeOptions {
+    let shell = agent.as_ref().map(|a| shell_manager(&a.agent_id, &client));
+    let intake_task =
+        store
+            .clone()
+            .zip(agent.clone())
+            .zip(shell.clone())
+            .map(|((store, agent), shell)| {
+                let client = client.clone();
+                let ident = ident.clone();
+                let opts = IntakeOptions {
+                    agent,
+                    blocks: Arc::new(PlatformBlocks::for_agent(&dir)),
+                    outbox_wake: Arc::clone(&reconnect),
+                    shutdown: shutdown.clone(),
+                };
+                tokio::spawn(async move {
+                    commands::intake_with(client, &ident, store, opts, Some(shell)).await;
+                })
+            });
+    // Newer trust documents (technician lists above all) and releases are
+    // fetched on every connect and every 15 minutes. No update client yet:
+    // offered releases are only logged.
+    let refresh_wake = Arc::new(Notify::new());
+    let refresh_task = store.clone().zip(agent).map(|(store, agent)| {
+        let opts = RefreshOptions {
             agent,
-            blocks: Arc::new(PlatformBlocks::for_agent(&dir)),
-            outbox_wake: Arc::clone(&reconnect),
+            shell,
+            on_release: None,
+            wake: Arc::clone(&refresh_wake),
             shutdown: shutdown.clone(),
         };
-        tokio::spawn(async move {
-            commands::intake_with(client, &ident, store, opts, Some(shell)).await;
-        })
+        let client = client.clone();
+        tokio::spawn(refresh::run(client, store, opts, REFRESH_INTERVAL))
     });
     let telemetry_task = store.map(|store| {
         let client = client.clone();
@@ -222,6 +243,7 @@ async fn run(state_dir: Option<PathBuf>, once: bool) -> u8 {
                 Some(ConnState::Connected) => {
                     tracing::info!("nats connected");
                     reconnect.notify_one();
+                    refresh_wake.notify_one();
                     if once {
                         break 0;
                     }
@@ -240,6 +262,9 @@ async fn run(state_dir: Option<PathBuf>, once: bool) -> u8 {
     };
     shutdown.cancel();
     if let Some(task) = intake_task {
+        let _ = task.await;
+    }
+    if let Some(task) = refresh_task {
         let _ = task.await;
     }
     if let Some(task) = telemetry_task {

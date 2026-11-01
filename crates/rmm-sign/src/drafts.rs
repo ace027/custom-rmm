@@ -6,8 +6,12 @@ use clap::ValueEnum;
 use rmm_proto::canonical::to_canonical_vec;
 use rmm_recipe::definition::{Definition, TYPE_DEFINITION};
 use rmm_recipe::validate::{BLOCKS, validate_definition};
-use rmm_trust::docs::{ArtifactRevocations, Command, TechnicianList, TrustManifest, decode_doc};
-use rmm_trust::envelope::{TYPE_COMMAND, TYPE_MANIFEST, TYPE_REVOCATIONS, TYPE_TECHLIST};
+use rmm_trust::docs::{
+    ArtifactRevocations, Command, ReleaseManifest, TechnicianList, TrustManifest, decode_doc,
+};
+use rmm_trust::envelope::{
+    TYPE_COMMAND, TYPE_MANIFEST, TYPE_RELEASE, TYPE_REVOCATIONS, TYPE_TECHLIST,
+};
 use rmm_trust::error::TrustError;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -27,6 +31,8 @@ pub enum DocType {
     Command,
     /// Catalog action definition.
     Definition,
+    /// Release manifest (draft `sha256` values are hex).
+    Release,
 }
 
 impl DocType {
@@ -38,6 +44,7 @@ impl DocType {
             Self::Techlist => TYPE_TECHLIST,
             Self::Command => TYPE_COMMAND,
             Self::Definition => TYPE_DEFINITION,
+            Self::Release => TYPE_RELEASE,
         }
     }
 
@@ -49,6 +56,7 @@ impl DocType {
             Self::Techlist,
             Self::Command,
             Self::Definition,
+            Self::Release,
         ]
         .into_iter()
         .find(|t| t.type_string() == s)
@@ -106,6 +114,7 @@ pub fn load_draft(ty: DocType, json: &str) -> Result<Draft> {
         DocType::Techlist => build::<TechnicianList>(json, TechnicianList::validate),
         DocType::Command => build::<Command>(json, Command::validate),
         DocType::Definition => build_definition(json),
+        DocType::Release => build::<ReleaseManifest>(json, ReleaseManifest::validate),
     }
 }
 
@@ -117,6 +126,7 @@ pub fn pretty_payload(ty: DocType, payload: &[u8]) -> Result<String> {
         DocType::Techlist => pretty::<TechnicianList>(payload),
         DocType::Command => pretty::<Command>(payload),
         DocType::Definition => pretty_definition(payload),
+        DocType::Release => pretty::<ReleaseManifest>(payload),
     }
 }
 

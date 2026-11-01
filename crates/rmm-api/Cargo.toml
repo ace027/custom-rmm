@@ -24,7 +24,7 @@ rmm-trust.workspace = true
 rmm-recipe.workspace = true
 rmm-proto.workspace = true
 sqlx.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["fs", "sync"] }
 tracing.workspace = true
 sha2.workspace = true
 ed25519-dalek.workspace = true

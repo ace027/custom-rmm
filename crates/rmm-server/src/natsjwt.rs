@@ -255,6 +255,7 @@ pub fn agent_pub_allow(agent: &AgentAuthRow) -> Vec<String> {
         format!("result.{c}.{a}"),
         format!("shell.{a}.*.out"),
         "svc.trust.latest".to_owned(),
+        "svc.release.latest".to_owned(),
         format!("$JS.API.CONSUMER.INFO.CMD.agent_{a}"),
         format!("$JS.API.CONSUMER.MSG.NEXT.CMD.agent_{a}"),
         format!("$JS.ACK.CMD.agent_{a}.>"),

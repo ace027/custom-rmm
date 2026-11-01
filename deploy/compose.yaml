@@ -107,15 +107,17 @@ services:
       # Shell session recordings (asciicast) and how long they are kept.
       RMM_RECORDING_DIR: /var/lib/rmm/recordings
       RMM_RECORDING_RETENTION_DAYS: ${RMM_RECORDING_RETENTION_DAYS:-365}
-    # Loopback only: the dev end-to-end script talks to the relay directly
-    # because deploy/nginx/nginx.conf does not forward WebSocket upgrades on
-    # /api/ yet.
+      # Release artifacts, stored under their SHA-256 (served at /v1/artifacts/).
+      RMM_ARTIFACT_DIR: /var/lib/rmm/artifacts
+    # Loopback only: the dev end-to-end script talks to the relay directly.
     ports:
       - "127.0.0.1:${RMM_API_PORT:-8080}:8080"
     volumes:
       # Created by scripts/dev-trust.sh, writable by the container user
       # (uid 10001). Production: a volume owned by that uid.
       - ./dev/recordings:/var/lib/rmm/recordings
+      # Like recordings: must exist and be writable by uid 10001 before start.
+      - ./dev/artifacts:/var/lib/rmm/artifacts
       - ./dev/auth:/run/rmm-auth:ro
       - ./dev/trust:/run/rmm-trust:ro
       - ./dev/webauthn:/run/rmm-webauthn:ro
