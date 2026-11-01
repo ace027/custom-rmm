@@ -236,7 +236,10 @@ pub const MAX_INBOUND: usize = MAX_CHUNK + 256;
 
 /// Forward a core NATS subscription into an [`Inbound`] queue until either
 /// side ends. Dropping the receiver drops the subscriber, which unsubscribes.
-async fn nats_subscribe(client: &async_nats::Client, subject: String) -> Result<Inbound, LinkError> {
+async fn nats_subscribe(
+    client: &async_nats::Client,
+    subject: String,
+) -> Result<Inbound, LinkError> {
     use futures_util::StreamExt as _;
 
     let mut sub = client
@@ -290,11 +293,17 @@ impl ShellLink for async_nats::Client {
     }
 
     fn subscribe_in<'a>(&'a self, agent_id: &'a str, sid: &'a str) -> LinkFuture<'a, Inbound> {
-        Box::pin(nats_subscribe(self, rmm_proto::subjects::shell_in(agent_id, sid)))
+        Box::pin(nats_subscribe(
+            self,
+            rmm_proto::subjects::shell_in(agent_id, sid),
+        ))
     }
 
     fn subscribe_ctl<'a>(&'a self, agent_id: &'a str, sid: &'a str) -> LinkFuture<'a, Inbound> {
-        Box::pin(nats_subscribe(self, rmm_proto::subjects::shell_ctl(agent_id, sid)))
+        Box::pin(nats_subscribe(
+            self,
+            rmm_proto::subjects::shell_ctl(agent_id, sid),
+        ))
     }
 }
 

@@ -252,3 +252,40 @@ signed `printing.spooler-restart.env`. It is idempotent; `--force` re-signs.
 documents through the API. Agents for the e2e scripts are built with that
 `RMM_ROOT_PUBKEYS`. `scripts/e2e-actions.sh` proves success, rollback,
 revocation and forged-result handling.
+
+## Co-signed shell (dev)
+
+`scripts/e2e-shell.sh` exercises the whole technician path with a software
+authenticator instead of a YubiKey. `scripts/dev-trust.sh` creates
+`deploy/dev/webauthn/` (the dev FIDO attestation root, `attestation-root.pem`,
+its key and `aaguid.hex`) with `cargo run -p xtask -- fake-authn ca --out DIR`,
+and `deploy/dev/recordings/` (where the API container writes session
+recordings, asciicast v2, one file per session). The API mounts the first
+read-only; `deploy/.env` needs `RMM_WEBAUTHN_ATTESTATION_ROOTS` and
+`RMM_WEBAUTHN_AAGUIDS` from `deploy/.env.example` (the e2e script appends them
+when missing). The dev AAGUID is `726d6d2d6465762d66616b652d6b6579`
+("rmm-dev-fake-key"); the API refuses to enable registration when it is listed
+without `RMM_AUTH_ALLOW_DEV=1`, and a techlist holding such a credential can be
+signed only with `rmm-sign ... --allow-aaguid`.
+
+By hand, with a dev token `$TECH_TOKEN` for the technician (`rmm-server
+dev-token --role RMM.Technician --sub alice`):
+
+```sh
+x=target/debug/xtask   # cargo build -p xtask
+$x fake-authn register --api https://localhost --token "$TECH_TOKEN" \
+   --dir /tmp/authn --ca deploy/dev/webauthn --cacert deploy/dev/certs/ca.pem
+# assign the technician to a client, then export, sign and publish the techlist
+curl .../api/v1/agents/$AGENT/shell -d '{"shell":"sh"}' > grant.json
+$x fake-authn assert --grant-response grant.json --dir /tmp/authn > open.json
+curl .../api/v1/shell-sessions/$GRANT_ID/open -d @open.json   # -> ws_url, ws_ticket
+```
+
+The relay is `GET /api/v1/shell-sessions/{session_id}/ws?ticket=` (binary
+frames are keystrokes and output, text frames JSON). The dev API listens on
+`127.0.0.1:${RMM_API_PORT:-8080}` for it because the nginx config does not yet
+forward WebSocket upgrades on `/api/`. An admin downloads the recording from
+`GET /api/v1/shell-sessions/{session_id}/recording`; the API deletes sessions
+and files older than `RMM_RECORDING_RETENTION_DAYS` (default 365) once a day.
+`e2e-shell.sh` takes about two minutes, most of it the 50 MB print and the
+45 s liveness wait.

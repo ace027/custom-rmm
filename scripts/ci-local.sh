@@ -60,6 +60,10 @@ job_test_linux() {
     docker compose -f deploy/compose.yaml logs --no-color || true
     exit 1
   fi
+  if ! run scripts/e2e-shell.sh; then
+    docker compose -f deploy/compose.yaml logs --no-color || true
+    exit 1
+  fi
   DATABASE_URL="postgres://rmm:${pw}@localhost:5432/rmm" SQLX_OFFLINE=false \
     run cargo sqlx prepare --workspace --check
 }

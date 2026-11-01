@@ -1,6 +1,7 @@
 //! Shared application state.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -48,8 +49,22 @@ pub fn load_command_key(path: &std::path::Path) -> Result<SigningKey, String> {
     Ok(SigningKey::from_bytes(&seed))
 }
 
+/// AAGUID of the development fake authenticator (`xtask fake-authn`),
+/// "rmm-dev-fake-key" in ASCII. Never a real device.
+pub const DEV_AAGUID: [u8; 16] = *b"rmm-dev-fake-key";
+
 fn load_attestation() -> Option<Arc<AttestationConfig>> {
     match AttestationConfig::from_env() {
+        Ok(Some(cfg))
+            if cfg.aaguids.contains(&DEV_AAGUID)
+                && std::env::var("RMM_AUTH_ALLOW_DEV").as_deref() != Ok("1") =>
+        {
+            tracing::error!(
+                "RMM_WEBAUTHN_AAGUIDS lists the development fake authenticator but \
+                 RMM_AUTH_ALLOW_DEV is not set; registration is disabled"
+            );
+            None
+        }
         Ok(Some(cfg)) => {
             tracing::info!(
                 roots = cfg.roots.len(),
@@ -132,7 +147,12 @@ pub struct AppState {
     /// WebAuthn attestation roots and AAGUID allowlist; `None` makes the
     /// credential registration endpoints answer 503.
     pub attestation: Option<Arc<AttestationConfig>>,
+    /// Directory holding shell session recordings (`RMM_RECORDING_DIR`).
+    pub recording_dir: PathBuf,
 }
+
+/// Default for `RMM_RECORDING_DIR`.
+pub const DEFAULT_RECORDING_DIR: &str = "/var/lib/rmm/recordings";
 
 impl AppState {
     /// Build the state with the default enrollment rate limit. WebAuthn
@@ -156,6 +176,9 @@ impl AppState {
             command_key_warned: Arc::new(AtomicBool::new(false)),
             enroll_limiter: Arc::new(IpLimiter::new(10, Duration::from_secs(60))),
             attestation: load_attestation(),
+            recording_dir: std::env::var_os("RMM_RECORDING_DIR")
+                .filter(|v| !v.is_empty())
+                .map_or_else(|| PathBuf::from(DEFAULT_RECORDING_DIR), PathBuf::from),
         }
     }
 
@@ -163,6 +186,13 @@ impl AppState {
     #[must_use]
     pub fn with_attestation(mut self, cfg: Option<AttestationConfig>) -> Self {
         self.attestation = cfg.map(Arc::new);
+        self
+    }
+
+    /// Set the directory recordings are written to.
+    #[must_use]
+    pub fn with_recording_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.recording_dir = dir.into();
         self
     }
 

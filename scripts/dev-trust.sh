@@ -9,6 +9,11 @@
 #                           capability ceiling [service, files.write]
 #   revocations.env         catalog-signed, empty, 45-day expiry
 #   printing.spooler-restart.env   catalog-signed spooler definition
+# and, next to it, for the dev co-signed shell:
+#   deploy/dev/webauthn     dev FIDO attestation root + AAGUID of the fake
+#                           authenticator (cargo run -p xtask -- fake-authn ca);
+#                           the API container mounts it read-only. Dev only.
+#   deploy/dev/recordings   where the API container writes shell recordings
 # and prints ROOT_PUBKEYS=<hex> on stdout (everything else goes to stderr).
 #
 # Idempotent: keys are created once and nothing is re-signed unless --force.
@@ -59,6 +64,15 @@ if [[ ! -f $dir/command.seed ]]; then
   log "created command key"
 fi
 [[ -f $dir/command.pub ]] || { echo "error: $dir/command.pub missing; remove $dir/command.seed and rerun" >&2; exit 1; }
+
+# Dev fake authenticator CA (idempotent) and the recordings directory. The API
+# container runs as uid 10001 and must be able to write the latter; both live
+# under the gitignored deploy/dev and are never used outside dev.
+web=deploy/dev/webauthn
+cargo run -q --locked -p xtask -- fake-authn ca --out "$web" >/dev/null
+chmod 755 "$web"
+mkdir -p deploy/dev/recordings
+chmod 777 deploy/dev/recordings
 
 root=$(pubkey_of "$dir/root.age")
 cat=$(pubkey_of "$dir/catalog.age")

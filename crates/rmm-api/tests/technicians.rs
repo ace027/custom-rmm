@@ -47,16 +47,16 @@ use x509_cert::Certificate;
 use x509_cert::builder::profile::BuilderProfile;
 use x509_cert::builder::{Builder, CertificateBuilder};
 use x509_cert::der::asn1::{Any, BitString, OctetString};
-use x509_cert::der::oid::ObjectIdentifier;
-use x509_cert::der::{Decode, Document};
-use x509_cert::spki::{AlgorithmIdentifierOwned, DynSignatureAlgorithmIdentifier, EncodePublicKey};
 use x509_cert::der::oid::AssociatedOid;
+use x509_cert::der::oid::ObjectIdentifier;
 use x509_cert::der::pem::LineEnding;
+use x509_cert::der::{Decode, Document};
 use x509_cert::der::{Encode, EncodePem};
 use x509_cert::ext::Extension;
 use x509_cert::ext::pkix::BasicConstraints;
 use x509_cert::name::Name;
 use x509_cert::serial_number::SerialNumber;
+use x509_cert::spki::{AlgorithmIdentifierOwned, DynSignatureAlgorithmIdentifier, EncodePublicKey};
 use x509_cert::spki::{SubjectPublicKeyInfoOwned, SubjectPublicKeyInfoRef};
 use x509_cert::time::{Time, Validity};
 
@@ -738,9 +738,15 @@ fn aws_chain(ca: &AwsCa, intermediate: bool) -> (Vec<Vec<u8>>, P256Key) {
             aaguid_ext: Some(AAGUID.to_vec()),
             validity: validity(-DAY, 365 * DAY),
         });
-        (vec![leaf.to_der().unwrap(), int.to_der().unwrap()], leaf_key)
+        (
+            vec![leaf.to_der().unwrap(), int.to_der().unwrap()],
+            leaf_key,
+        )
     } else {
-        let leaf = ca.issue(profile(LEAF_DN, ROOT_DN, false, Some(AAGUID)), spki(&leaf_key));
+        let leaf = ca.issue(
+            profile(LEAF_DN, ROOT_DN, false, Some(AAGUID)),
+            spki(&leaf_key),
+        );
         (vec![leaf.to_der().unwrap()], leaf_key)
     }
 }

@@ -14,6 +14,14 @@ rmm-trust = { workspace = true, features = ["sign"] }
 ciborium.workspace = true
 serde_json.workspace = true
 hex.workspace = true
+# fake-authn: a software FIDO2 authenticator for dev and CI.
+p256 = { workspace = true, features = ["pkcs8", "alloc"] }
+x509-cert = { version = "0.3", default-features = false, features = ["pem", "std", "builder"] }
+sha2.workspace = true
+rand.workspace = true
+data-encoding.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true

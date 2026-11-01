@@ -5,6 +5,9 @@ pub mod admin;
 pub mod attestation;
 pub mod auth;
 pub mod enroll;
+pub mod recording;
+pub mod relay;
+pub mod shell;
 pub mod state;
 pub mod technicians;
 
@@ -45,6 +48,8 @@ pub enum ApiError {
     NotFound(String),
     /// 409.
     Conflict(String),
+    /// 410.
+    Gone(String),
     /// 422.
     Unprocessable(String),
     /// 429.
@@ -82,6 +87,7 @@ impl IntoResponse for ApiError {
             Self::Forbidden => (StatusCode::FORBIDDEN, "forbidden".to_string()),
             Self::NotFound(m) => (StatusCode::NOT_FOUND, m),
             Self::Conflict(m) => (StatusCode::CONFLICT, m),
+            Self::Gone(m) => (StatusCode::GONE, m),
             Self::Unprocessable(m) => (StatusCode::UNPROCESSABLE_ENTITY, m),
             Self::Unavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, m),
             Self::TooManyRequests => (StatusCode::TOO_MANY_REQUESTS, "rate limited".to_string()),
@@ -140,7 +146,11 @@ impl Modify for BearerAuth {
         actions::get_action_run,
         technicians::register_begin,
         technicians::register_finish,
-        technicians::techlist_draft
+        technicians::techlist_draft,
+        shell::create_grant,
+        shell::open_shell,
+        relay::shell_ws,
+        recording::get_recording
     ),
     components(schemas(
         Health,
@@ -154,7 +164,11 @@ impl Modify for BearerAuth {
         technicians::AuthenticatorSelection,
         technicians::RegisterBeginResponse,
         technicians::RegisterFinishRequest,
-        technicians::RegisterFinishResponse
+        technicians::RegisterFinishResponse,
+        shell::GrantRequest,
+        shell::GrantResponse,
+        shell::OpenRequest,
+        shell::OpenResponse
     )),
     modifiers(&BearerAuth)
 )]
@@ -205,6 +219,19 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/admin/techlist-draft",
             get(technicians::techlist_draft),
         )
+        .route("/api/v1/agents/{agent_id}/shell", post(shell::create_grant))
+        .route(
+            "/api/v1/shell-sessions/{grant_id}/open",
+            post(shell::open_shell),
+        )
+        .route(
+            "/api/v1/shell-sessions/{session_id}/ws",
+            get(relay::shell_ws),
+        )
+        .route(
+            "/api/v1/shell-sessions/{session_id}/recording",
+            get(recording::get_recording),
+        )
         .with_state(state)
 }
 
@@ -236,6 +263,10 @@ mod tests {
             "/api/v1/technicians/me/credentials/register/begin",
             "/api/v1/technicians/me/credentials/register/finish",
             "/api/v1/admin/techlist-draft",
+            "/api/v1/agents/{agent_id}/shell",
+            "/api/v1/shell-sessions/{grant_id}/open",
+            "/api/v1/shell-sessions/{session_id}/ws",
+            "/api/v1/shell-sessions/{session_id}/recording",
         ] {
             assert!(doc.paths.paths.contains_key(p), "missing {p}");
         }

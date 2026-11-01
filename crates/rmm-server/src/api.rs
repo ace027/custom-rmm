@@ -55,8 +55,28 @@ pub async fn build_router() -> Result<Router> {
         }
     };
 
-    Ok(rmm_api::router(
-        AppState::new(pool, authenticator, nats, roots, nats_public_url)
-            .with_command_key(command_key),
-    ))
+    let state = AppState::new(pool, authenticator, nats, roots, nats_public_url)
+        .with_command_key(command_key);
+
+    let retention_days: u32 = crate::env_or(
+        "RMM_RECORDING_RETENTION_DAYS",
+        &rmm_api::recording::DEFAULT_RETENTION_DAYS.to_string(),
+    )
+    .parse()
+    .context("RMM_RECORDING_RETENTION_DAYS must be a number of days")?;
+    anyhow::ensure!(
+        retention_days >= 1,
+        "RMM_RECORDING_RETENTION_DAYS must be at least 1"
+    );
+    tracing::info!(
+        dir = %state.recording_dir.display(),
+        retention_days,
+        "shell recordings"
+    );
+    tokio::spawn(rmm_api::recording::retention_loop(
+        state.clone(),
+        retention_days,
+    ));
+
+    Ok(rmm_api::router(state))
 }

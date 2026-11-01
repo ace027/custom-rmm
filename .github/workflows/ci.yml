@@ -115,6 +115,10 @@ jobs:
         env:
           RMM_HTTPS_PORT: "8443"
         run: scripts/e2e-actions.sh
+      - name: End-to-end co-signed shell (grant, hardware co-sign, relay, backpressure, timeouts, lockout, recording)
+        env:
+          RMM_HTTPS_PORT: "8443"
+        run: scripts/e2e-shell.sh
       - name: sqlx offline data is current
         env:
           SQLX_OFFLINE: "false"

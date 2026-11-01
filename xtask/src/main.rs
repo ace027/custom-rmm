@@ -1,7 +1,9 @@
 //! Developer automation: `cargo run -p xtask -- openapi [--check]` and
-//! `cargo run -p xtask -- action-fixtures [--out DIR]`.
+//! `cargo run -p xtask -- action-fixtures [--out DIR]` and
+//! `cargo run -p xtask -- fake-authn ca|register|assert` (dev and CI only).
 
 mod action_fixtures;
+mod fake_authn;
 
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
@@ -58,7 +60,11 @@ fn main() -> ExitCode {
                 None => Err("--out needs a directory".to_string()),
             }
         }
-        _ => Err("usage: xtask openapi [--check] | action-fixtures [--out DIR]".to_string()),
+        Some("fake-authn") => fake_authn::run(&args[1..]),
+        _ => Err(
+            "usage: xtask openapi [--check] | action-fixtures [--out DIR] | fake-authn ca|register|assert"
+                .to_string(),
+        ),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
