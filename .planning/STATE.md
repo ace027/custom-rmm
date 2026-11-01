@@ -2,12 +2,12 @@
 
 ## Current Position
 - **Phase**: 8 of 9 (executing)
-- **Status**: Phase 8 executing — Plan 08-02 complete
-- **Last Activity**: Plan 08-02 execution (2026-11-01)
+- **Status**: Phase 8 executing — Plan 08-03 complete
+- **Last Activity**: Plan 08-03 execution (2026-11-01)
 
 ## Progress
 ```
-[##################..] 90% — 27/30 plans complete
+[##################..] 93% — 28/30 plans complete
 ```
 
 ## Recent Decisions
@@ -98,3 +98,4 @@ Run `/triad:build` to execute Phase 8: Watchdog and A/B updater
 (build started 2026-11-01)
 - Plan 08-01 (Wave 1): Signed releases, artifact hosting and trust/release distribution — Complete with Warnings
 - Plan 08-02 (Wave 2): Watchdog: A/B slots, verified apply, health rollback and supervision — Complete
+- Plan 08-03 (Wave 3): Agent update client, health signal and end-to-end update — Complete with Warnings
