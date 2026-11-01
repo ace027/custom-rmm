@@ -434,6 +434,14 @@ impl Store {
         Ok(())
     }
 
+    /// Delete every queued message and return how many were removed. Used
+    /// after re-enrolling under a new agent id, whose credentials cannot
+    /// publish on the old subjects.
+    pub fn outbox_clear(&self) -> Result<u64> {
+        let n = self.lock().execute("DELETE FROM outbox", [])?;
+        Ok(n as u64)
+    }
+
     /// Number of queued messages.
     pub fn outbox_len(&self) -> Result<u64> {
         let n: i64 = self
