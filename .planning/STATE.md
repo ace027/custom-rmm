@@ -2,8 +2,8 @@
 
 ## Current Position
 - **Phase**: 4 of 9 (executing)
-- **Status**: Phase 4 executing — Plan 04-02 complete
-- **Last Activity**: Plan 04-02 execution (2026-11-01)
+- **Status**: Phase 4 executing — Plan 04-03 failed
+- **Last Activity**: Plan 04-03 execution (2026-11-01)
 
 ## Progress
 ```
@@ -59,3 +59,4 @@ Fix the failed plans and run `/triad:build` again (completed plans are kept), or
 - Plan 04-01 (Wave 1): Telemetry schema, roles, RLS and repositories — Complete
 - Plan 04-02 (Wave 1): Telemetry wire types, collectors and agent publisher — PARTIAL: Telemetry wire types, sysinfo collectors and the `rmm-agent run` publisher are implemented and pass their tests, the Windows build, layering, no-sign and cargo deny. The workspace-wide clippy command 
 - Plan 04-02 (Wave 1): Telemetry wire types, collectors and agent publisher — Complete
+- Plan 04-03 (Wave 2): Ingest service and end-to-end telemetry — FAILED: Verification failed: RMM_HTTPS_PORT=8443 scripts/e2e-telemetry.sh; RMM_HTTPS_PORT=8443 scripts/e2e-enroll.sh
