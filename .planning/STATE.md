@@ -2,8 +2,8 @@
 
 ## Current Position
 - **Phase**: 9 of 9 (executing)
-- **Status**: Phase 9 executing — Plan 09-01 complete
-- **Last Activity**: Plan 09-01 execution (2026-11-01)
+- **Status**: Phase 9 executing — Plan 09-02 failed
+- **Last Activity**: Plan 09-02 execution (2026-11-01)
 
 ## Progress
 ```
@@ -103,3 +103,4 @@ Run `/triad:build` to execute Phase 9: MSI packaging
 ## Phase 9 Results
 (build started 2026-11-01)
 - Plan 09-01 (Wave 1): WiX package, xtask msi and agent enrollment flag — Complete
+- Plan 09-02 (Wave 2): MSI CI checks and Windows validation matrix — PARTIAL: I wrote the check script, the CI `msi` job and the runbook, and linked the runbook from `docs/dev-environment.md`. The plan's grep and yaml checks pass. The script and the CI job have never run, becau
