@@ -1,9 +1,9 @@
 # Project State
 
 ## Current Position
-- **Phase**: 6 of 9 (executed, pending review)
-- **Status**: Phase 6 under review — cycle 1/3, 0 blocker(s) remaining
-- **Last Activity**: Phase 6 review cycle 1 (2026-11-01)
+- **Phase**: 6 of 9 (complete)
+- **Status**: Phase 6 complete — review passed (1 cycle(s))
+- **Last Activity**: Phase 6 review (2026-11-01)
 
 ## Progress
 ```
@@ -29,7 +29,7 @@
 - rmm-sign extended (user-approved quick task): `definition` doc type (validated with rmm-recipe, catalog role) and `keygen-command` for the online server command key (0600 seed file; no seed export for root, catalog or card keys)
 
 ## Next Action
-Run `/triad:review` to verify Phase 6: Signed commands and first catalog action
+Run `/triad:plan 7` to plan Phase 7: Co-signed remote shell
 
 ## Phase 1 Results
 (build started 2026-10-31)

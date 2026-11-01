@@ -7,7 +7,7 @@
 - [x] Phase 3: Enrollment and NATS auth callout (4 plans)
 - [x] Phase 4: Heartbeat, inventory and metrics (3 plans)
 - [x] Phase 5: Encrypted local store and offline sync (2 plans)
-- [ ] Phase 6: Signed commands and first catalog action (4 plans)
+- [x] Phase 6: Signed commands and first catalog action (4 plans)
 - [ ] Phase 7: Co-signed remote shell (4 plans)
 - [ ] Phase 8: Watchdog and A/B updater (3 plans)
 - [ ] Phase 9: MSI packaging (2 plans)
@@ -125,7 +125,7 @@
 | 3 | 5 | 5 | Complete |
 | 4 | 3 | 3 | Complete |
 | 5 | 2 | 2 | Complete |
-| 6 | 4 | 4 | Executed |
+| 6 | 4 | 4 | Complete |
 | 7 | 4 | 0 | Pending |
 | 8 | 3 | 0 | Pending |
 | 9 | 2 | 0 | Pending |

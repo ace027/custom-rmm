@@ -51,6 +51,7 @@ Managed by the memory manager. Learnings recorded with /triad:learn are kept bel
 | D-043 | 2026-11-01 | claude/rmm-backend-explore-plan-6pu4ue | manual-edit | Phase 4, post-build manual edit to crates/rmm-db/src/telemetry.rs | Agent output for crates/rmm-db/src/telemetry.rs (see plan 04-01 SUMMARY.md) | User edited crates/rmm-db/src/telemetry.rs — +6/-1 lines: +    #[allow(dead_code)] // selected to keep the query shape / -    field!(disk_free_bytes); / +    // disk_free_bytes is volatile: updated below but never / ... | corrective | engineering-backend-architect | manual-edit, rs, engineering |
 | D-044 | 2026-11-01 | claude/rmm-backend-explore-plan-6pu4ue | review-verdict | Phase 5 review | PASS | accepted | positive | system | review |
 | D-045 | 2026-11-01 | claude/rmm-backend-explore-plan-6pu4ue | manual-edit | Phase 6, post-build manual edit to crates/rmm-agent-core/src/commands.rs | Agent output for crates/rmm-agent-core/src/commands.rs (see plan 06-02 SUMMARY.md) | User edited crates/rmm-agent-core/src/commands.rs — +6/-0 lines: +        // A fresh inbox per pull, not the shared request m / +        // delivers a pulled message under its stream subje / +        // (`agent.<id>.cmd`), which the multiplexer cannot / ... | corrective | engineering-senior-developer | manual-edit, rs, engineering |
+| D-046 | 2026-11-01 | claude/rmm-backend-explore-plan-6pu4ue | review-verdict | Phase 6 review | PASS | accepted | positive | system | review |
 
 ## PRF-001: Open a PR via GitHub MCP for each working branch so CI runs
 - **Date**: 2026-10-31
