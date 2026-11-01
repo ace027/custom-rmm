@@ -1,8 +1,8 @@
 # Project State
 
 ## Current Position
-- **Phase**: 6 of 9 (executing)
-- **Status**: Phase 6 executing — Plan 06-04 failed
+- **Phase**: 6 of 9 (partial — 1 plan(s) failed)
+- **Status**: Phase 6 partial — 06-04 failed, stopped after wave 3, review needed
 - **Last Activity**: Plan 06-04 execution (2026-11-01)
 
 ## Progress
