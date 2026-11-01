@@ -1,13 +1,13 @@
 # Project State
 
 ## Current Position
-- **Phase**: 8 of 9 (planned)
-- **Status**: Phase 8 planned -- 3 plans across 3 waves
-- **Last Activity**: Phase 8 planning (2026-11-01)
+- **Phase**: 8 of 9 (executing)
+- **Status**: Phase 8 executing — Plan 08-01 complete
+- **Last Activity**: Plan 08-01 execution (2026-11-01)
 
 ## Progress
 ```
-[################....] 83% — 25/30 plans complete
+[#################...] 86% — 26/30 plans complete
 ```
 
 ## Recent Decisions
@@ -93,3 +93,7 @@ Run `/triad:build` to execute Phase 8: Watchdog and A/B updater
 - Plan 07-03 (Wave 2): Agent shell: co-sign verification, ConPTY session pump and lockout — Complete
 - Plan 07-04 (Wave 3): Grant API, browser relay, recordings and end-to-end shell — PARTIAL: Grant/open endpoints, relay, recordings with retention, NATS/compose config, fake authenticator and e2e script are written. The Rust-side verification passes, but scripts/e2e-shell.sh has not complete
 - Plan 07-04 (Wave 3): Grant API, browser relay, recordings and end-to-end shell — Complete with Warnings
+
+## Phase 8 Results
+(build started 2026-11-01)
+- Plan 08-01 (Wave 1): Signed releases, artifact hosting and trust/release distribution — Complete with Warnings
