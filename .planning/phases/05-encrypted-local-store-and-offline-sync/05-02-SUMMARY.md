@@ -77,8 +77,8 @@
 ## Escalations
 | # | Severity | Type | Decision | Status | Resolution |
 |---|----------|------|----------|--------|------------|
-| 1 | blocker | out-of-scope file / plan conflict | Approve a change to scripts/e2e-telemetry.sh so the 10000-sample burst in (6b) uses distinct msg_ids, for example 1000 distinct CBOR payloads published one by one, or a nats-box {{Count}} template. | pending | INVALID: type "out-of-scope file / plan conflict" is not one of architecture, dependency, scope, schema, api, deletion, infrastructure, quality |
-| 2 | blocker | quality | Resolve: ENVIRONMENT issue persisted after one automatic retry: 4.858 error: failed to extract package: No space left on device (os error 28) | pending |  |
+| 1 | blocker | out-of-scope file / plan conflict | Approve a change to scripts/e2e-telemetry.sh so the 10000-sample burst in (6b) uses distinct msg_ids, for example 1000 distinct CBOR payloads published one by one, or a nats-box {{Count}} template. | approved | User approved distinct msg_ids for the e2e-telemetry burst. Orchestrator changed scripts/e2e-telemetry.sh to publish 1000 distinct newline-separated batches (commit dff70af); the full script passes locally, including (6b). |
+| 2 | blocker | quality | Resolve: ENVIRONMENT issue persisted after one automatic retry: 4.858 error: failed to extract package: No space left on device (os error 28) | approved | Disk space freed (about 9 GB before the run); re-run the build to verify 05-02. |
 
 - #1 context: The plan's required verification runs e2e-telemetry.sh, but that file is not in files_modified. Its burst reuses one fixed msg_id, which the required durable dedupe now collapses to a single batch (10 samples). Only check (6b) fails, and only for that reason. I did not edit the file.
 - #2 context: Verification failed (RMM_HTTPS_PORT=8443 scripts/e2e-telemetry.sh; DATABASE_URL=postgres://rmm:$(grep '^RMM_PG_PASSWORD=' deploy/.env.example / cut -d= -f2)@127.0.0.1:5432/rmm cargo test -p rmm-db -p rmm-server --locked); a BLOCKER is not auto-fixed.
