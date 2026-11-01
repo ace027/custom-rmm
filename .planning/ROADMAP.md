@@ -123,7 +123,7 @@
 | 1 | 3 | 3 | Complete |
 | 2 | 4 | 4 | Complete |
 | 3 | 5 | 5 | Complete |
-| 4 | 3 | 1 | Partial |
+| 4 | 3 | 2 | In Progress |
 | 5 | 2 | 0 | Pending |
 | 6 | 4 | 0 | Pending |
 | 7 | 4 | 0 | Pending |
