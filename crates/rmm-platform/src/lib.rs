@@ -3,7 +3,9 @@
 pub mod collect;
 #[cfg(debug_assertions)]
 pub mod fake;
+pub mod indicator;
 mod keystore;
+pub mod pty;
 pub mod quarantine;
 pub mod services;
 pub mod smbios;

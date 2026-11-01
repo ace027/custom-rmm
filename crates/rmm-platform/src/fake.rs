@@ -4,11 +4,13 @@
 //! `Spooler` running and changes state only when told to, so waits never
 //! block. Service names are case-insensitive, as on Windows.
 
-use std::collections::BTreeMap;
-use std::sync::{Mutex, MutexGuard};
+use std::collections::{BTreeMap, VecDeque};
+use std::io::{Read, Write};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use crate::PlatformError;
+use crate::pty::Pty;
 use crate::services::{Result, ServiceState, Services};
 
 /// Environment variable naming a service whose start leaves it stopped.
@@ -129,6 +131,113 @@ impl Services for FakeServices {
                 timeout.as_secs()
             )))
         }
+    }
+}
+
+/// In-memory [`Pty`]: replays scripted output and records written input.
+#[derive(Debug, Clone)]
+pub struct FakePty {
+    output: Arc<Mutex<VecDeque<Vec<u8>>>>,
+    input: Arc<Mutex<Vec<u8>>>,
+    exit: Arc<Mutex<Option<i32>>>,
+    size: Arc<Mutex<(u16, u16)>>,
+    killed: Arc<Mutex<bool>>,
+}
+
+impl FakePty {
+    /// A pty whose reader yields each item of `output` in turn, then EOF.
+    pub fn new(output: impl Iterator<Item = Vec<u8>>) -> Self {
+        Self {
+            output: Arc::new(Mutex::new(output.collect())),
+            input: Arc::new(Mutex::new(Vec::new())),
+            exit: Arc::new(Mutex::new(None)),
+            size: Arc::new(Mutex::new((80, 24))),
+            killed: Arc::new(Mutex::new(false)),
+        }
+    }
+
+    /// Make `try_wait` report this exit code.
+    pub fn set_exit(&self, code: i32) {
+        *lock(&self.exit) = Some(code);
+    }
+
+    /// Everything written to the pty so far.
+    pub fn input(&self) -> Vec<u8> {
+        lock(&self.input).clone()
+    }
+
+    /// The last size set by `resize` (`cols`, `rows`).
+    pub fn size(&self) -> (u16, u16) {
+        *lock(&self.size)
+    }
+
+    /// Whether `kill` was called.
+    pub fn killed(&self) -> bool {
+        *lock(&self.killed)
+    }
+}
+
+struct FakeReader {
+    output: Arc<Mutex<VecDeque<Vec<u8>>>>,
+    pending: Vec<u8>,
+}
+
+impl Read for FakeReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.pending.is_empty() {
+            match lock(&self.output).pop_front() {
+                Some(chunk) => self.pending = chunk,
+                None => return Ok(0),
+            }
+        }
+        let n = buf.len().min(self.pending.len());
+        buf[..n].copy_from_slice(&self.pending[..n]);
+        self.pending.drain(..n);
+        Ok(n)
+    }
+}
+
+struct FakeWriter(Arc<Mutex<Vec<u8>>>);
+
+impl Write for FakeWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        lock(&self.0).extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Pty for FakePty {
+    fn reader(&mut self) -> Box<dyn Read + Send> {
+        Box::new(FakeReader {
+            output: self.output.clone(),
+            pending: Vec::new(),
+        })
+    }
+
+    fn writer(&mut self) -> Box<dyn Write + Send> {
+        Box::new(FakeWriter(self.input.clone()))
+    }
+
+    fn resize(&self, cols: u16, rows: u16) -> std::result::Result<(), PlatformError> {
+        *lock(&self.size) = (cols, rows);
+        Ok(())
+    }
+
+    fn kill(&mut self) -> std::result::Result<(), PlatformError> {
+        *lock(&self.killed) = true;
+        let mut exit = lock(&self.exit);
+        if exit.is_none() {
+            *exit = Some(137);
+        }
+        Ok(())
+    }
+
+    fn try_wait(&mut self) -> std::result::Result<Option<i32>, PlatformError> {
+        Ok(*lock(&self.exit))
     }
 }
 

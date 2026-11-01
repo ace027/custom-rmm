@@ -12,6 +12,9 @@ rmm-proto.workspace = true
 thiserror.workspace = true
 zeroize.workspace = true
 sysinfo.workspace = true
+portable-pty.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+serde_json.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true
