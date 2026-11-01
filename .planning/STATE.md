@@ -1,9 +1,9 @@
 # Project State
 
 ## Current Position
-- **Phase**: 6 of 9 (planned)
-- **Status**: Phase 6 planned -- 4 plans across 3 waves
-- **Last Activity**: Phase 6 planning (2026-11-01)
+- **Phase**: 6 of 9 (executing)
+- **Status**: Phase 6 executing — Plan 06-01 failed
+- **Last Activity**: Plan 06-01 execution (2026-11-01)
 
 ## Progress
 ```
@@ -70,3 +70,7 @@ Run `/triad:build` to execute Phase 6: Signed commands and first catalog action
 - Plan 05-02 (Wave 2): Offline outbox, drain and server-side dedupe — PARTIAL: Dedupe, the agent outbox with drain on reconnect, and e2e-offline.sh are done. e2e-offline.sh passes again after the retry (Docker Hub 429 cleared). e2e-telemetry.sh still fails at check (6b) because 
 - Plan 05-02 (Wave 2): Offline outbox, drain and server-side dedupe — FAILED: Verification failed: RMM_HTTPS_PORT=8443 scripts/e2e-offline.sh; RMM_HTTPS_PORT=8443 scripts/e2e-telemetry.sh; DATABASE_URL=postgres://rmm:$(grep '^RMM_PG_PASSWORD=' deploy/.env.example | cut -d= -f2)
 - Plan 05-02 (Wave 2): Offline outbox, drain and server-side dedupe — Complete
+
+## Phase 6 Results
+(build started 2026-11-01)
+- Plan 06-01 (Wave 1): Recipe schema, validator, fixtures and phase dependencies — PARTIAL: none
