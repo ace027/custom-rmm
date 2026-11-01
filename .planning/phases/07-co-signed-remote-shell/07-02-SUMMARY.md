@@ -52,9 +52,9 @@
 ## Escalations
 | # | Severity | Type | Decision | Status | Resolution |
 |---|----------|------|----------|--------|------------|
-| 1 | warning | architecture | Should attestation chain verification support RSA and P-384 issuers? That needs a new dependency. | pending |  |
+| 1 | warning | architecture | Should attestation chain verification support RSA and P-384 issuers? That needs a new dependency. | approved | User approved: support ECDSA P-384/SHA-384 and RSA PKCS#1 v1.5 SHA-256 chain signatures via aws-lc-rs (already in the tree through jsonwebtoken); plan 07-02 updated. |
 | 2 | info | security | Production deployments must not set the dev attestation root or the dev AAGUID. | pending | INVALID: type "security" is not one of architecture, dependency, scope, schema, api, deletion, infrastructure, quality |
-| 3 | blocker | quality | Resolve: $ cargo run -q -p xtask -- openapi && git diff --exit-code docs/openapi.json (exit 1) | pending |  |
+| 3 | blocker | quality | Resolve: $ cargo run -q -p xtask -- openapi && git diff --exit-code docs/openapi.json (exit 1) | approved | User approved the check fix: the verification now regenerates docs/openapi.json and compares it with the working tree (cmp against a copy) instead of git diff against HEAD. |
 
 - #1 context: crates/rmm-api/src/attestation.rs verify_signed_by accepts only ecdsa-with-SHA256 on P-256 issuers. Yubico's FIDO attestation roots may be RSA, so production registration with real YubiKeys can be rejected. It fails closed, so this is not a security hole. It is a functionality gap to settle before production.
 - #2 context: If they do, a software (fake) authenticator could register. The dev values are only in deploy/.env.example and compose.yaml (SEC-003 LOW).
