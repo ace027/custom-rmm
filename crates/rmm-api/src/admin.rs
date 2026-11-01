@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 
+use async_nats::jetstream;
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
@@ -11,15 +12,19 @@ use axum::response::{IntoResponse, Response};
 use rand::TryRng;
 use rmm_db::repo::{self, NewToken};
 use rmm_db::scope::{Scope, begin_scoped};
+use rmm_trust::docs::{Command, CommandBody};
 use rmm_trust::envelope::Envelope;
+use rmm_trust::keys::Bytes as KeyBytes;
 use rmm_trust::keys::PublicKey;
 use rmm_trust::store::{Clock, DocKind, SeqStore, TrustStore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use sqlx::Row;
 use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::types::{JsonValue, Uuid};
 use utoipa::ToSchema;
 
+use crate::actions::{cmd_subject, ensure_agent_consumer, sign_command};
 use crate::auth::{Admin, RequireRole};
 use crate::state::AppState;
 use crate::{ApiError, ErrorBody};
@@ -438,6 +443,100 @@ pub async fn put_trust(
         &detail,
     )
     .await?;
+    let agents = if inserted {
+        active_agents(&mut tx).await?
+    } else {
+        Vec::new()
+    };
     tx.commit().await?;
+    if inserted {
+        push_trust_update(&state, doc_kind, &body, &agents).await;
+    }
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// How long a pushed `TrustUpdate` stays valid. Long, so an agent that is
+/// offline when a technician is removed still applies the list on reconnect.
+const TRUST_UPDATE_TTL_SECS: u64 = 24 * 3600;
+
+/// `(agent_id, client_id)` of every active agent.
+async fn active_agents(tx: &mut repo::Tx<'_>) -> Result<Vec<(Uuid, Uuid)>, ApiError> {
+    let rows = sqlx::query("select id, client_id from tenant.agent where status = 'active'")
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(ApiError::internal)?;
+    rows.iter()
+        .map(|r| Ok((r.get("id"), r.get("client_id"))))
+        .collect::<Result<_, sqlx::Error>>()
+        .map_err(ApiError::internal)
+}
+
+/// Sign a `TrustUpdate` carrying the stored document for every active agent
+/// and publish it on the agent's command subject, so running agents apply a new
+/// technician list (and close the shells of removed technicians) without a
+/// restart. Best effort: the artifact is already stored and enrolling agents
+/// read it from their bundle, so a failure is logged, not returned.
+async fn push_trust_update(
+    state: &AppState,
+    kind: DocKind,
+    envelope: &[u8],
+    agents: &[(Uuid, Uuid)],
+) {
+    let (Some(key), Some(nats)) = (state.command_key.as_deref(), state.nats.as_ref()) else {
+        tracing::warn!("no command key or NATS client; trust update not pushed to agents");
+        return;
+    };
+    let js = jetstream::new(nats.clone());
+    let doc = Some(KeyBytes(envelope.to_vec()));
+    let (manifest, revocations, techlist) = match kind {
+        DocKind::Manifest => (doc, None, None),
+        DocKind::Revocations => (None, doc, None),
+        DocKind::Techlist => (None, None, doc),
+    };
+    let now = u64::try_from(Utc::now().timestamp()).unwrap_or(0);
+    for &(agent_id, client_id) in agents {
+        let mut raw = [0u8; 16];
+        if let Err(err) = rand::rngs::SysRng.try_fill_bytes(&mut raw) {
+            tracing::error!(%err, "no randomness for a trust update");
+            return;
+        }
+        let cmd = Command {
+            cmd_id: KeyBytes(raw.to_vec()),
+            agent_id: agent_id.to_string(),
+            client_id: client_id.to_string(),
+            issued_at: now,
+            expires_at: now + TRUST_UPDATE_TTL_SECS,
+            policy_hash: KeyBytes(vec![0; 32]),
+            body: CommandBody::TrustUpdate {
+                manifest: manifest.clone(),
+                revocations: revocations.clone(),
+                techlist: techlist.clone(),
+            },
+        };
+        let signed = match sign_command(key, &cmd) {
+            Ok(b) => b,
+            Err(err) => {
+                tracing::error!(?err, %agent_id, "cannot sign a trust update");
+                continue;
+            }
+        };
+        if let Err(err) = ensure_agent_consumer(&js, agent_id).await {
+            tracing::error!(%err, %agent_id, "cannot ensure the agent command consumer");
+            continue;
+        }
+        let mut headers = async_nats::HeaderMap::new();
+        headers.insert(
+            async_nats::header::NATS_MESSAGE_ID,
+            Uuid::from_bytes(raw).to_string(),
+        );
+        let sent = async {
+            js.publish_with_headers(cmd_subject(agent_id), headers, signed.into())
+                .await?
+                .await
+        }
+        .await;
+        if let Err(err) = sent {
+            tracing::error!(%err, %agent_id, "trust update not published");
+        }
+    }
 }

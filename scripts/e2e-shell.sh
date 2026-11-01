@@ -17,15 +17,15 @@
 #   (2) a valid grant opens an 'sh' session over the WebSocket relay and
 #       'echo e2e-shell-ok' round-trips; the shell exits with its code
 #   (3) rmm-session printed state connected while the session was open, idle after
-#   (4) printing 50 MB completes while the agent's VmRSS, sampled every second,
-#       stays under 50 MB
+#   (4) printing 1 GiB completes while the agent's VmRSS, sampled every second,
+#       and its VmHWM (peak resident set since start) stay under 50 MB
 #   (5) a grant with max_duration 5 is closed with reason max_duration
 #   (6) a browser that dies without a close frame makes the agent close the
 #       session with reason liveness within 60 s (default 45 s timeout)
-#   (7) after the techlist is re-signed without the technician and published, a
-#       new grant is refused by an agent enrolled afterwards: unknown_tech
-#       (agents take the techlist from their enrollment bundle; the server does
-#       not push TrustUpdate yet, so a fresh agent stands in for a synced one)
+#   (7) while an agent keeps running, the techlist is re-signed without the
+#       technician and published: the server pushes a signed TrustUpdate, the
+#       live session is closed with reason tech_removed, and a new grant is
+#       refused with unknown_tech
 #   (8) the recording of check (2) exists, is valid asciicast v2, contains
 #       e2e-shell-ok and matches the hash stored on the session
 #
@@ -57,6 +57,7 @@ TECH=
 C1=
 LIVENESS_BUDGET=60
 RSS_LIMIT_KB=51200
+BIG_BYTES=1073741824 # 1 GiB
 
 stop_agent() {
   if [[ -n $BG_PID ]]; then
@@ -249,7 +250,7 @@ def pump(deadline):
             window += payload
         elif op == 0x1:
             window += b"\n[ctl] " + payload + b"\n"
-        window = window[-(1 << 20):]
+        window = window[-(1 << 16):]
         return True
     return False
 
@@ -532,26 +533,30 @@ got=$(q "select encode(recording_sha256, 'hex') || ' ' || recording_bytes from t
 [[ $got == "$want $(stat -c %s "$WORK/rec.cast")" ]] || fail "(8) stored hash/size '$got' differ from the file ($want)"
 pass "(8) recording is valid asciicast v2 with e2e-shell-ok; its hash and size match the database"
 
-# (4) 50 MB of output.
+# (4) 1 GiB of output.
 open_shell "$AG" sh
 LINE=$(printf 'a%.0s' $(seq 1 100))
 : >"$WORK/rss.txt"
 (while :; do rss_kb "$AGENT_PID" >>"$WORK/rss.txt" 2>/dev/null || break; sleep 1; done) &
 SAMPLER=$!
 set +e
-WS_TIMEOUT=600 ws "$WS_URL" "send:yes $LINE | head -c 52428800; echo BIG-DONE-\$((40+2))\n" 'expect:BIG-DONE-42' \
+WS_TIMEOUT=1800 ws "$WS_URL" "send:yes $LINE | head -c $BIG_BYTES; echo BIG-DONE-\$((40+2))\n" 'expect:BIG-DONE-42' \
   'send:exit\n' 'expect:\[ctl\].*"type":"exit"' >"$WORK/ws4.out" 2>"$WORK/ws4.err"
 rc=$?
 set -e
 kill "$SAMPLER" 2>/dev/null || true
 wait "$SAMPLER" 2>/dev/null || true
-[[ $rc -eq 0 ]] || fail "(4) printing 50 MB did not complete (rc $rc): $(tail -c 600 "$WORK/ws4.err")"
+[[ $rc -eq 0 ]] || fail "(4) printing 1 GiB did not complete (rc $rc): $(tail -c 600 "$WORK/ws4.err")"
 rx=$(sed -n 's/^RX_BYTES //p' "$WORK/ws4.out")
-[[ ${rx:-0} -ge 52428800 ]] || fail "(4) only ${rx:-0} bytes arrived, want at least 52428800"
+[[ ${rx:-0} -ge $BIG_BYTES ]] || fail "(4) only ${rx:-0} bytes arrived, want at least $BIG_BYTES"
 MAX_RSS=$(sort -n "$WORK/rss.txt" | tail -n 1)
 [[ -n $MAX_RSS ]] || fail "(4) no RSS samples"
 ((MAX_RSS < RSS_LIMIT_KB)) || fail "(4) agent VmRSS reached $MAX_RSS kB (limit $RSS_LIMIT_KB kB, idle $BASE_RSS kB)"
-pass "(4) 50 MB ($rx bytes) printed; agent VmRSS peaked at $MAX_RSS kB (idle $BASE_RSS kB, limit $RSS_LIMIT_KB kB, $(wc -l <"$WORK/rss.txt") samples)"
+# VmHWM is the kernel's own peak, so a spike between two samples still counts.
+HWM_KB=$(awk '/^VmHWM:/ {print $2}' "/proc/$AGENT_PID/status")
+[[ -n $HWM_KB ]] || fail "(4) cannot read the agent's VmHWM"
+((HWM_KB < RSS_LIMIT_KB)) || fail "(4) agent VmHWM reached $HWM_KB kB (limit $RSS_LIMIT_KB kB)"
+pass "(4) 1 GiB ($rx bytes) printed; agent VmRSS peaked at $MAX_RSS kB, VmHWM $HWM_KB kB (idle $BASE_RSS kB, limit $RSS_LIMIT_KB kB, $(wc -l <"$WORK/rss.txt") samples)"
 
 # (5) max_duration.
 open_shell "$AG" sh 5
@@ -583,12 +588,26 @@ await_log "shell session closed.*liveness" "$LIVENESS_BUDGET" "(6)"
 [[ $(await_closed "$S6_ID" 20) == browser_disconnect ]] || fail "(6) close reason is '$(close_reason "$S6_ID")', want browser_disconnect"
 pass "(6) the agent closed the abandoned session with liveness $((SECONDS - T0)) s after the browser died (budget $LIVENESS_BUDGET s)"
 await_state idle 20
-stop_agent
 
-# (7) The technician leaves the techlist.
+# (7) The technician leaves the techlist while the agent keeps running: the
+# server pushes a signed TrustUpdate, the agent closes the live session with
+# tech_removed and refuses a new grant with unknown_tech.
+open_shell "$AG" sh
+S7_ID=$SID
+python3 -I "$WORK/wsclient.py" "$WS_URL" 'send:echo alive-$((3+4))\n' 'expect:alive-7' hold >"$WORK/ws7.out" 2>"$WORK/ws7.err" &
+WS7=$!
+for _ in $(seq 1 60); do
+  grep -q READY "$WORK/ws7.out" && break
+  kill -0 "$WS7" 2>/dev/null || fail "(7) the WebSocket client ended early: $(cat "$WORK/ws7.err")"
+  sleep 0.5
+done
+grep -q READY "$WORK/ws7.out" || fail "(7) the session never answered: $(cat "$WORK/ws7.err")"
+[[ -z $(close_reason "$S7_ID") ]] || fail "(7) the session was closed before the techlist changed"
 publish_techlist gone remove-tech
-enroll agent-late
-start_agent agent-late
+[[ $(await_closed "$S7_ID" 30) == tech_removed ]] || fail "(7) close reason is '$(close_reason "$S7_ID")', want tech_removed"
+kill -9 "$WS7" 2>/dev/null || true
+wait "$WS7" 2>/dev/null || true
+pass "(7) removing $TECH from the published techlist closed the live session of the running agent: tech_removed"
 STARTED=$(log_count "shell session started")
 open_shell "$AG" sh
 await_log 'shell open rejected' 30 "(7)"
@@ -596,6 +615,6 @@ grep -Eq 'reason="?unknown_tech"?' <<<"$(plain_log)" \
   || fail "(7) agent did not refuse with unknown_tech: $(grep 'shell open' "$AGENT_LOG")"
 sleep 1
 [[ $(log_count "shell session started") -eq $STARTED ]] || fail "(7) a shell started for a removed technician"
-pass "(7) with the technician removed from the signed techlist a new grant is refused: unknown_tech"
+pass "(7) the running agent refuses a new grant for the removed technician: unknown_tech"
 
 echo "e2e shell: all checks passed"
