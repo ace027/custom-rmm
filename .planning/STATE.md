@@ -1,9 +1,9 @@
 # Project State
 
 ## Current Position
-- **Phase**: 6 of 9 (complete)
-- **Status**: Phase 6 complete — review passed (1 cycle(s))
-- **Last Activity**: Phase 6 review (2026-11-01)
+- **Phase**: 7 of 9 (planned)
+- **Status**: Phase 7 planned -- 4 plans across 3 waves
+- **Last Activity**: Phase 7 planning (2026-11-01)
 
 ## Progress
 ```
@@ -29,7 +29,7 @@
 - rmm-sign extended (user-approved quick task): `definition` doc type (validated with rmm-recipe, catalog role) and `keygen-command` for the online server command key (0600 seed file; no seed export for root, catalog or card keys)
 
 ## Next Action
-Run `/triad:plan 7` to plan Phase 7: Co-signed remote shell
+Run `/triad:build` to execute Phase 7: Co-signed remote shell
 
 ## Phase 1 Results
 (build started 2026-10-31)
