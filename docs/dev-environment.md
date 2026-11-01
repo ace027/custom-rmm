@@ -240,6 +240,13 @@ clone flagging. It runs the agent as root in a private mount namespace with a
 fake `/sys/class/dmi`, so it needs root or passwordless sudo. It leaves the
 stack running.
 
+## MSI checks
+
+CI builds the MSI on windows-2022 and windows-2025 and runs
+`scripts/msi-check.ps1` (install rollback, install, repair, uninstall). Enrollment
+on real Win10, Win11, Server 2019 and Server 2022 machines against this dev stack
+is manual: see [docs/runbooks/msi-validation.md](runbooks/msi-validation.md).
+
 ## Dev trust chain
 
 `scripts/dev-trust.sh` (run by `dev-up.sh`) uses `rmm-sign` with throwaway keys

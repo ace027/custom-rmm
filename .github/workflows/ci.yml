@@ -141,6 +141,45 @@ jobs:
           [ -f deploy/.env ] || cp deploy/.env.example deploy/.env
           docker compose -f deploy/compose.yaml down -v
 
+  msi:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    env:
+      # Public key of RFC 8032 test vector 1: a fixed dev/test value, never a production root.
+      RMM_ROOT_PUBKEYS: d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msi-${{ matrix.os }}
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add --global WixToolset.Util.wixext/5.0.2
+      - name: Build MSI
+        run: cargo run --locked -p xtask -- msi --out dist
+      - name: Check install rollback, install, repair and uninstall
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File scripts/msi-check.ps1 -Msi (Get-ChildItem dist/*.msi).FullName -LogDir msi-logs
+      - name: Upload MSI
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-${{ matrix.os }}
+          path: dist/*.msi
+          if-no-files-found: warn
+      - name: Upload install logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-logs-${{ matrix.os }}
+          path: msi-logs/*.log
+          if-no-files-found: warn
+
   test-windows:
     runs-on: windows-2025
     steps:
