@@ -2,9 +2,11 @@
 
 pub mod actions;
 pub mod admin;
+pub mod attestation;
 pub mod auth;
 pub mod enroll;
 pub mod state;
+pub mod technicians;
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -135,7 +137,10 @@ impl Modify for BearerAuth {
         admin::put_trust,
         actions::put_catalog,
         actions::issue_action,
-        actions::get_action_run
+        actions::get_action_run,
+        technicians::register_begin,
+        technicians::register_finish,
+        technicians::techlist_draft
     ),
     components(schemas(
         Health,
@@ -145,7 +150,11 @@ impl Modify for BearerAuth {
         actions::CatalogEntry,
         actions::IssueRequest,
         actions::IssueResponse,
-        actions::ActionRunResponse
+        actions::ActionRunResponse,
+        technicians::AuthenticatorSelection,
+        technicians::RegisterBeginResponse,
+        technicians::RegisterFinishRequest,
+        technicians::RegisterFinishResponse
     )),
     modifiers(&BearerAuth)
 )]
@@ -184,6 +193,18 @@ pub fn router(state: AppState) -> Router {
             post(actions::issue_action),
         )
         .route("/api/v1/action-runs/{cmd_id}", get(actions::get_action_run))
+        .route(
+            "/api/v1/technicians/me/credentials/register/begin",
+            post(technicians::register_begin),
+        )
+        .route(
+            "/api/v1/technicians/me/credentials/register/finish",
+            post(technicians::register_finish),
+        )
+        .route(
+            "/api/v1/admin/techlist-draft",
+            get(technicians::techlist_draft),
+        )
         .with_state(state)
 }
 
@@ -212,6 +233,9 @@ mod tests {
             "/api/v1/catalog",
             "/api/v1/agents/{agent_id}/actions",
             "/api/v1/action-runs/{cmd_id}",
+            "/api/v1/technicians/me/credentials/register/begin",
+            "/api/v1/technicians/me/credentials/register/finish",
+            "/api/v1/admin/techlist-draft",
         ] {
             assert!(doc.paths.paths.contains_key(p), "missing {p}");
         }

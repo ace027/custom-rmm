@@ -1,6 +1,12 @@
 //! `xtask action-fixtures [--out DIR]`: deterministic golden files for the
-//! agent's command-rejection tests. Uses rmm-trust's `sign` feature, which is
-//! fine here because xtask is not an agent-side crate.
+//! agent's command-rejection and shell-verification tests. Uses rmm-trust's
+//! `sign` feature, which is fine here because xtask is not an agent-side crate.
+//!
+//! xtask has no general-purpose signer (rmm-trust's signer only signs the
+//! 39-byte envelope message), so WebAuthn assertions made with a technician
+//! credential are produced by the agent tests themselves from the documented
+//! credential seeds; the fixtures carry the signed trust documents and a
+//! `ShellOpen` that the server command key alone can produce.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -8,10 +14,14 @@ use std::path::{Path, PathBuf};
 use ciborium::Value;
 use rmm_proto::canonical::to_canonical_vec;
 use rmm_recipe::definition::{Arg, Definition, ParamKind, ParamSpec, Step};
-use rmm_trust::docs::{ArtifactRevocations, Cert, Command, CommandBody, Role, TrustManifest};
-use rmm_trust::envelope::{Envelope, TYPE_COMMAND, TYPE_MANIFEST, TYPE_REVOCATIONS};
+use rmm_trust::docs::{
+    ArtifactRevocations, COSE_EDDSA, Cert, Command, CommandBody, Credential, Role, ShellGrant,
+    Technician, TechnicianList, TrustManifest,
+};
+use rmm_trust::envelope::{Envelope, TYPE_COMMAND, TYPE_MANIFEST, TYPE_REVOCATIONS, TYPE_TECHLIST};
 use rmm_trust::keys::{Bytes, KeyId};
 use rmm_trust::sign::{Ed25519Signer, Signer, sign_envelope};
+use rmm_trust::webauthn::{Assertion, shell_challenge};
 
 /// The fixed "current time" all fixtures are relative to (2027-01-15 08:00 UTC).
 pub const NOW: u64 = 1_800_000_000;
@@ -29,6 +39,19 @@ const ROOT_SEED: [u8; 32] = [0x11; 32];
 const CATALOG_SEED: [u8; 32] = [0x22; 32];
 const COMMAND_SEED: [u8; 32] = [0x33; 32];
 const ROGUE_SEED: [u8; 32] = [0x44; 32];
+/// Software Ed25519 credential seeds of the fixture technicians.
+const ALICE_CRED_SEED: [u8; 32] = [0x66; 32];
+const BOB_CRED_SEED: [u8; 32] = [0x67; 32];
+const CAROL_CRED_SEED: [u8; 32] = [0x68; 32];
+/// Technician in scope of the fixture client.
+pub const ALICE: &str = "tech_alice";
+/// Technician scoped to another client only.
+pub const BOB: &str = "tech_bob";
+/// Technician with scope `*`.
+pub const CAROL: &str = "tech_carol";
+const OTHER_CLIENT_ID: &str = "client_0000000000000099";
+const RP_ID: &str = "console.example.test";
+const ORIGIN: &str = "https://console.example.test";
 
 type Res<T> = Result<T, String>;
 
@@ -104,6 +127,63 @@ impl Ctx {
     }
 }
 
+/// SHA-256 via the envelope content id (SHA-256 of the payload), so xtask
+/// needs no hash crate of its own.
+fn sha256(data: &[u8]) -> [u8; 32] {
+    Envelope {
+        v: 1,
+        r#type: String::new(),
+        payload: Bytes(data.to_vec()),
+        sigs: Vec::new(),
+    }
+    .content_id()
+}
+
+fn b64url(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::new();
+    for ch in data.chunks(3) {
+        let n = ch
+            .iter()
+            .enumerate()
+            .fold(0u32, |a, (i, b)| a | (u32::from(*b) << (16 - 8 * i)));
+        for i in 0..=ch.len() {
+            out.push(char::from(T[((n >> (18 - 6 * i)) & 63) as usize]));
+        }
+    }
+    out
+}
+
+/// COSE_Key of an Ed25519 (OKP, alg -8, crv 6) credential.
+fn ed25519_cose(key: &Ed25519Signer) -> Res<Vec<u8>> {
+    let map = Value::Map(vec![
+        (Value::from(1), Value::from(1)),
+        (Value::from(3), Value::from(-8)),
+        (Value::from(-1), Value::from(6)),
+        (
+            Value::from(-2),
+            Value::Bytes(key.public_key().to_bytes().to_vec()),
+        ),
+    ]);
+    let mut out = Vec::new();
+    ciborium::ser::into_writer(&map, &mut out).map_err(e("encode cose key"))?;
+    Ok(out)
+}
+
+fn tech(id: &str, scope: &[&str], cred_n: u8, seed: &[u8; 32]) -> Res<Technician> {
+    Ok(Technician {
+        tech_id: id.into(),
+        client_scope: scope.iter().map(|s| (*s).to_owned()).collect(),
+        perms: vec!["shell".into()],
+        creds: vec![Credential {
+            cred_id: Bytes(vec![cred_n; 16]),
+            alg: COSE_EDDSA,
+            cose_pubkey: Bytes(ed25519_cose(&Ed25519Signer::from_seed(seed))?),
+            aaguid: Bytes(vec![0xAA; 16]),
+        }],
+    })
+}
+
 fn readme() -> String {
     format!(
         "# Action golden fixtures\n\n\
@@ -134,7 +214,19 @@ Key seeds: root 0x11, catalog 0x22, command 0x33, rogue 0x44 (repeated 32 times)
 - `cmd-wrong-agent.env`: addressed to `{OTHER_AGENT_ID}`.\n\
 - `cmd-unknown-block.env`: invokes `definition-unknown-block.env` (fails static validation).\n\
 - `cmd-bad-param.env`: invokes `definition-param.env` with `wait_s = 9999` (fails param validation).\n\
-- `cmd-good-param.env`: invokes `definition-param.env` with `wait_s = 30` (passes).\n"
+- `cmd-good-param.env`: invokes `definition-param.env` with `wait_s = 30` (passes).\n\n\
+## Shell (technician list signed by the catalog key, which holds the techlist role)\n\n\
+Manifest console RP id `{RP_ID}`, origin `{ORIGIN}`. Credentials are software Ed25519\n\
+(COSE alg -8, crv 6) with AAGUID 0xAA x16; the tests sign assertions with these seeds.\n\n\
+- `techlist.env`: seq 1 (issued NOW-86400, expires NOW+30 days). `{ALICE}` scope [`{CLIENT_ID}`],\n\
+  cred id 0xA1 x16, seed 0x66; `{BOB}` scope [`{OTHER_CLIENT_ID}`], cred id 0xB1 x16, seed 0x67;\n\
+  `{CAROL}` scope [`*`], cred id 0xC1 x16, seed 0x68.\n\
+- `techlist-removed.env`: seq 2, the same list without `{ALICE}`. Applying `techlist.env` after it\n\
+  is a rollback.\n\
+- `cmd-shell-server-only.env`: ShellOpen (cmd id 0x20 x16, issued NOW-10, expires NOW+590) with a\n\
+  valid grant for `{ALICE}` (grant id 0x21 x16, cred 0xA1 x16, issued NOW-5, open_by NOW+60,\n\
+  max_duration 3600, shell `sh`) and an assertion with correct authenticator and client data\n\
+  but a signature the server cannot make (64 zero bytes): what the command key alone produces.\n"
     )
 }
 
@@ -171,8 +263,8 @@ pub fn run(out: &Path) -> Res<()> {
             (Role::Command, 1),
         ]),
         revoked_keys: vec![],
-        console_rp_id: "console.example.test".into(),
-        console_origins: vec!["https://console.example.test".into()],
+        console_rp_id: RP_ID.into(),
+        console_origins: vec![ORIGIN.into()],
         capability_ceiling: vec!["service".into(), "files.write".into()],
         revocation_mirrors: vec![],
     };
@@ -272,6 +364,71 @@ pub fn run(out: &Path) -> Res<()> {
     let bad_param = ctx.command(8, AGENT_ID, ok_from, ok_to, &param_def, wait(9999))?;
     let good_param = ctx.command(9, AGENT_ID, ok_from, ok_to, &param_def, wait(30))?;
 
+    // Shell: technician lists and a ShellOpen the command key alone can make.
+    let techs = vec![
+        tech(ALICE, &[CLIENT_ID], 0xA1, &ALICE_CRED_SEED)?,
+        tech(BOB, &[OTHER_CLIENT_ID], 0xB1, &BOB_CRED_SEED)?,
+        tech(CAROL, &["*"], 0xC1, &CAROL_CRED_SEED)?,
+    ];
+    let techlist_env = |seq: u64, techs: Vec<Technician>| -> Res<Envelope> {
+        let list = TechnicianList {
+            seq,
+            issued_at: NOW - DAY,
+            expires_at: NOW + 30 * DAY,
+            techs,
+        };
+        sign(
+            TYPE_TECHLIST,
+            to_canonical_vec(&list).map_err(e("encode techlist"))?,
+            &catalog,
+        )
+    };
+    let techlist = techlist_env(1, techs.clone())?;
+    let techlist_removed = techlist_env(2, techs[1..].to_vec())?;
+    let grant = ShellGrant {
+        grant_id: Bytes(vec![0x21; 16]),
+        agent_id: AGENT_ID.into(),
+        client_id: CLIENT_ID.into(),
+        tech_id: ALICE.into(),
+        cred_id: Bytes(vec![0xA1; 16]),
+        issued_at: NOW - 5,
+        open_by: NOW + 60,
+        max_duration: 3600,
+        shell: "sh".into(),
+        record: true,
+        e2e_pubkey: None,
+    };
+    let grant_bytes = to_canonical_vec(&grant).map_err(e("encode grant"))?;
+    let mut auth_data = sha256(RP_ID.as_bytes()).to_vec();
+    auth_data.push(0x05); // UP | UV
+    auth_data.extend_from_slice(&1u32.to_be_bytes());
+    let client_data = format!(
+        "{{\"type\":\"webauthn.get\",\"challenge\":\"{}\",\"origin\":\"{ORIGIN}\"}}",
+        b64url(&shell_challenge(&grant_bytes))
+    );
+    let forged = Assertion {
+        authenticator_data: auth_data,
+        client_data_json: client_data.into_bytes(),
+        signature: vec![0; 64],
+    };
+    let shell_cmd = Command {
+        cmd_id: Bytes(vec![0x20; 16]),
+        agent_id: AGENT_ID.into(),
+        client_id: CLIENT_ID.into(),
+        issued_at: ok_from,
+        expires_at: ok_to,
+        policy_hash: Bytes(vec![0; 32]),
+        body: CommandBody::ShellOpen {
+            grant: Bytes(grant_bytes),
+            assertion: Bytes(to_canonical_vec(&forged).map_err(e("encode assertion"))?),
+        },
+    };
+    let shell_server_only = sign(
+        TYPE_COMMAND,
+        to_canonical_vec(&shell_cmd).map_err(e("encode command"))?,
+        &ctx.command,
+    )?;
+
     let files: Vec<(&str, Vec<u8>)> = vec![
         (
             "root.pub.hex",
@@ -294,6 +451,9 @@ pub fn run(out: &Path) -> Res<()> {
         ("cmd-unknown-block.env", env_bytes(&unknown_cmd)?),
         ("cmd-bad-param.env", env_bytes(&bad_param)?),
         ("cmd-good-param.env", env_bytes(&good_param)?),
+        ("techlist.env", env_bytes(&techlist)?),
+        ("techlist-removed.env", env_bytes(&techlist_removed)?),
+        ("cmd-shell-server-only.env", env_bytes(&shell_server_only)?),
         ("README.md", readme().into_bytes()),
     ];
     for (name, bytes) in &files {
@@ -378,6 +538,22 @@ mod tests {
         assert!(store.verify_role(&rogue, Role::Catalog, NOW).is_err());
         let good = Envelope::from_bytes(&read(&dir, "definition-valid.env")).expect("env");
         assert!(store.verify_role(&good, Role::Catalog, NOW).is_ok());
+        // The server-only ShellOpen is a validly signed command.
+        assert!(verify("cmd-shell-server-only.env", AGENT_ID, &mut fresh).is_ok());
+
+        // Technician lists: seq 2 replaces seq 1; going back is a rollback.
+        store
+            .apply_techlist(&read(&dir, "techlist.env"), &clock, &mut seq)
+            .expect("techlist");
+        assert!(store.techlist().and_then(|l| l.tech(ALICE)).is_some());
+        store
+            .apply_techlist(&read(&dir, "techlist-removed.env"), &clock, &mut seq)
+            .expect("techlist-removed");
+        assert!(store.techlist().and_then(|l| l.tech(ALICE)).is_none());
+        assert!(matches!(
+            store.apply_techlist(&read(&dir, "techlist.env"), &clock, &mut seq),
+            Err(TrustError::Rollback { .. })
+        ));
         std::fs::remove_dir_all(&dir).ok();
     }
 }

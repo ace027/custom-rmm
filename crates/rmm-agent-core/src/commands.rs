@@ -16,19 +16,27 @@
 //! Until the signed policy engine exists, that root-signed ceiling is the
 //! capability allow-list; it is applied to the definition's capability and
 //! to the capability group of every block it uses.
+//!
+//! `ShellOpen` commands pass the same envelope checks and then
+//! [`crate::shell_verify::verify_shell_open`] (grant, technician list and the
+//! technician's WebAuthn assertion) before [`ShellManager::open`]. A
+//! `TrustUpdate` installs its documents through the verifying [`TrustStore`]
+//! (role, threshold, time, non-decreasing sequence) and closes the shells of
+//! technicians the new list no longer contains.
 
 use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use rmm_recipe::definition::{Definition, TYPE_DEFINITION};
-use rmm_recipe::result::{ActionResult, RejectReason};
+use rmm_recipe::definition::{Definition, Stage, TYPE_DEFINITION};
+use rmm_recipe::result::{ActionResult, Outcome, RejectReason, StageOutcome};
 use rmm_recipe::validate::{BLOCKS, validate_definition, validate_params};
-use rmm_trust::docs::{Command, CommandBody, Role, decode_doc};
+use rmm_trust::docs::{Command, CommandBody, Role, TechnicianList, decode_doc};
 use rmm_trust::envelope::Envelope;
 use rmm_trust::error::TrustError;
-use rmm_trust::keys::PublicKey;
+use rmm_trust::keys::{Bytes, KeyId, PublicKey};
 use rmm_trust::store::{Clock, DocKind, ReplayCache, TrustStore};
+use rmm_trust::webauthn::Assertion;
 use sha2::{Digest, Sha256};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
@@ -38,6 +46,8 @@ use zeroize::Zeroizing;
 use crate::blocks::BlockRunner;
 use crate::executor;
 use crate::identity::Identity;
+use crate::shell::ShellManager;
+use crate::shell_verify::{self, ShellReject};
 use crate::store::{Store, StoreError};
 
 /// JetStream stream carrying commands.
@@ -224,19 +234,30 @@ fn reject<T>(reason: RejectReason, why: impl fmt::Display) -> Result<T, RejectRe
     Err(reason)
 }
 
-/// Run the verification chain over a command envelope.
-pub fn verify(env_bytes: &[u8], ctx: &mut VerifyCtx<'_>) -> Result<Verified, RejectReason> {
-    let now = ctx.clock.now();
-    let command = match ctx.trust.verify_command(
+/// The envelope checks shared by every command kind
+/// ([`TrustStore::verify_command`]).
+fn check_command(env_bytes: &[u8], ctx: &mut VerifyCtx<'_>) -> Result<Command, RejectReason> {
+    match ctx.trust.verify_command(
         env_bytes,
         ctx.agent_id,
         ctx.client_id,
         ctx.clock,
         ctx.replay,
     ) {
-        Ok(c) => c,
-        Err(e) => return reject(trust_reason(&e), e),
-    };
+        Ok(c) => Ok(c),
+        Err(e) => reject(trust_reason(&e), e),
+    }
+}
+
+/// Run the verification chain over a command envelope.
+pub fn verify(env_bytes: &[u8], ctx: &mut VerifyCtx<'_>) -> Result<Verified, RejectReason> {
+    let command = check_command(env_bytes, ctx)?;
+    verify_invoke(command, ctx)
+}
+
+/// The invoke-specific checks after [`check_command`].
+fn verify_invoke(command: Command, ctx: &VerifyCtx<'_>) -> Result<Verified, RejectReason> {
+    let now = ctx.clock.now();
     let CommandBody::Invoke { definition, params } = &command.body else {
         return reject(RejectReason::Validation, "not an invoke command");
     };
@@ -390,14 +411,29 @@ impl Agent {
     }
 }
 
-/// Verify and, if accepted, execute one envelope. Never fails: every path
-/// ends in a result.
+/// Verify and, if accepted, execute one envelope without a shell manager
+/// (every `ShellOpen` is refused). Never fails: every path ends in a result.
 pub fn handle(
     env_bytes: &[u8],
     agent: &Agent,
     store: &Store,
     blocks: &dyn BlockRunner,
     clock: &dyn Clock,
+) -> ActionResult {
+    handle_with(env_bytes, agent, store, blocks, clock, None)
+}
+
+/// Verify and, if accepted, execute one envelope. `ShellOpen` goes to
+/// `shell` (refused with `too_many_sessions` when there is none) and a
+/// `TrustUpdate` technician list closes the sessions of removed technicians.
+/// Never fails: every path ends in a result.
+pub fn handle_with(
+    env_bytes: &[u8],
+    agent: &Agent,
+    store: &Store,
+    blocks: &dyn BlockRunner,
+    clock: &dyn Clock,
+    shell: Option<&ShellManager>,
 ) -> ActionResult {
     let trust = load_trust(store, agent.roots.clone(), agent.threshold, clock);
     let mut replay = store;
@@ -409,20 +445,211 @@ pub fn handle(
         replay: &mut replay,
         agent_version: &agent.version,
     };
-    match verify(env_bytes, &mut ctx) {
-        Ok(v) => {
-            tracing::info!(
-                cmd_id = %crate::blocks::hex(&v.command.cmd_id.0),
-                definition = %v.definition.id,
-                "running command"
+    let rejected = |reason| {
+        let (cmd_id, def_id) = envelope_ids(env_bytes);
+        executor::rejected(cmd_id, &agent.agent_id, def_id, reason)
+    };
+    let command = match check_command(env_bytes, &mut ctx) {
+        Ok(c) => c,
+        Err(reason) => return rejected(reason),
+    };
+    match &command.body {
+        CommandBody::ShellOpen { grant, assertion } => {
+            let r = shell_open(
+                &command,
+                &grant.0,
+                &assertion.0,
+                &trust,
+                agent,
+                store,
+                clock,
+                shell,
             );
-            executor::run(&v, blocks)
+            shell_result(&command, agent, r)
         }
-        Err(reason) => {
-            let (cmd_id, def_id) = envelope_ids(env_bytes);
-            executor::rejected(cmd_id, &agent.agent_id, def_id, reason)
+        CommandBody::TrustUpdate {
+            manifest,
+            revocations,
+            techlist,
+        } => {
+            let docs = [
+                (DocKind::Manifest, manifest),
+                (DocKind::Revocations, revocations),
+                (DocKind::Techlist, techlist),
+            ];
+            match trust_update(trust, &docs, store, clock, shell) {
+                Ok(()) => finished(&command, agent, Vec::new()),
+                Err(reason) => rejected(reason),
+            }
+        }
+        CommandBody::Invoke { .. } => match verify_invoke(command, &ctx) {
+            Ok(v) => {
+                tracing::info!(
+                    cmd_id = %crate::blocks::hex(&v.command.cmd_id.0),
+                    definition = %v.definition.id,
+                    "running command"
+                );
+                executor::run(&v, blocks)
+            }
+            Err(reason) => rejected(reason),
+        },
+        CommandBody::Collect { .. } => {
+            tracing::warn!("command rejected: collect is not supported");
+            rejected(RejectReason::Validation)
         }
     }
+}
+
+/// A succeeded result with `stages` and no definition.
+fn finished(command: &Command, agent: &Agent, stages: Vec<StageOutcome>) -> ActionResult {
+    ActionResult {
+        cmd_id: Bytes(command.cmd_id.0.clone()),
+        agent_id: agent.agent_id.clone(),
+        definition_content_id: KeyId([0; 32]),
+        outcome: Outcome::Succeeded,
+        reason: None,
+        stages,
+        finished_at: SystemClock.now(),
+    }
+}
+
+/// The JSON `detail` of a shell result: `{"status":"started","sid":..}` or
+/// `{"status":"rejected","reason":..}`.
+pub fn shell_detail(r: Result<&str, ShellReject>) -> String {
+    match r {
+        Ok(sid) => serde_json::json!({ "status": "started", "sid": sid }),
+        Err(e) => serde_json::json!({ "status": "rejected", "reason": e.as_str() }),
+    }
+    .to_string()
+}
+
+/// The signed result of a `ShellOpen`: succeeded with one `steps` stage
+/// whose detail is [`shell_detail`], or rejected with the closest
+/// [`RejectReason`] and one failed `precheck` stage carrying the stable
+/// [`ShellReject`] reason.
+fn shell_result(command: &Command, agent: &Agent, r: Result<String, ShellReject>) -> ActionResult {
+    let now = SystemClock.now();
+    let stage = |stage, ok, detail| StageOutcome {
+        stage,
+        ok,
+        started_at: now,
+        finished_at: now,
+        detail,
+    };
+    match r {
+        Ok(sid) => finished(
+            command,
+            agent,
+            vec![stage(Stage::Steps, true, shell_detail(Ok(&sid)))],
+        ),
+        Err(e) => {
+            let mut res = executor::rejected(
+                command.cmd_id.0.clone(),
+                &agent.agent_id,
+                [0; 32],
+                e.reject_reason(),
+            );
+            res.stages = vec![stage(Stage::Precheck, false, shell_detail(Err(e)))];
+            res
+        }
+    }
+}
+
+/// Verify a `ShellOpen` and start the session; returns the session id.
+#[allow(clippy::too_many_arguments)]
+fn shell_open(
+    command: &Command,
+    grant: &[u8],
+    assertion: &[u8],
+    trust: &TrustStore,
+    agent: &Agent,
+    store: &Store,
+    clock: &dyn Clock,
+    shell: Option<&ShellManager>,
+) -> Result<String, ShellReject> {
+    // An undecodable assertion fails at the assertion step, after the grant
+    // checks, so the reported reason follows the documented order.
+    let assertion: Assertion = decode_doc(assertion).unwrap_or(Assertion {
+        authenticator_data: Vec::new(),
+        client_data_json: Vec::new(),
+        signature: Vec::new(),
+    });
+    let expiry = shell_verify::replay_expiry(grant);
+    let seen = |key: &[u8]| {
+        let mut replay = store;
+        replay.seen(key, expiry)
+    };
+    let v = shell_verify::verify_shell_open(
+        command,
+        grant,
+        &assertion,
+        trust,
+        &agent.agent_id,
+        &agent.client_id,
+        clock.now(),
+        &seen,
+    )?;
+    let sid = v.sid();
+    match shell {
+        Some(m) => m.open(v)?,
+        None => {
+            tracing::warn!(%sid, "shell open rejected: no shell manager");
+            return Err(ShellReject::TooManySessions);
+        }
+    }
+    Ok(sid)
+}
+
+/// Apply the documents of a `TrustUpdate` (manifest, then revocations, then
+/// technician list), each through the verifying [`TrustStore`] (signer role,
+/// threshold, time and a sequence number not below the persisted floor)
+/// before it replaces the cached envelope. Open shells are then re-checked
+/// against the resulting technician list.
+fn trust_update(
+    mut trust: TrustStore,
+    docs: &[(DocKind, &Option<Bytes>)],
+    store: &Store,
+    clock: &dyn Clock,
+    shell: Option<&ShellManager>,
+) -> Result<(), RejectReason> {
+    let mut outcome = Ok(());
+    for (kind, doc) in docs {
+        let Some(doc) = doc else { continue };
+        let mut seq = store;
+        let applied = match kind {
+            DocKind::Manifest => trust.apply_manifest(&doc.0, clock, &mut seq),
+            DocKind::Revocations => trust.apply_revocations(&doc.0, clock, &mut seq),
+            DocKind::Techlist => trust.apply_techlist(&doc.0, clock, &mut seq),
+        };
+        if let Err(e) = applied {
+            outcome = reject(trust_reason(&e), format_args!("{kind:?} update: {e}"));
+            break;
+        }
+        if store.seq_write_failed() {
+            outcome = reject(RejectReason::StaleTrust, "sequence floor not persisted");
+            break;
+        }
+        if let Err(e) = store.trust_put(*kind, &doc.0) {
+            outcome = reject(
+                RejectReason::StaleTrust,
+                format_args!("{kind:?} not cached: {e}"),
+            );
+            break;
+        }
+        tracing::info!(?kind, "trust document updated");
+    }
+    if let Some(m) = shell {
+        match trust.techlist() {
+            Some(list) => m.on_techlist(list),
+            None => m.on_techlist(&TechnicianList {
+                seq: 0,
+                issued_at: 0,
+                expires_at: 0,
+                techs: Vec::new(),
+            }),
+        }
+    }
+    outcome
 }
 
 /// Sign `result` and queue it in the outbox at priority 0.
@@ -456,10 +683,21 @@ pub fn process_pending(
     blocks: &dyn BlockRunner,
     clock: &dyn Clock,
 ) -> Result<usize, StoreError> {
+    process_pending_with(store, agent, blocks, clock, None)
+}
+
+/// [`process_pending`] with a shell manager for `ShellOpen` commands.
+pub fn process_pending_with(
+    store: &Store,
+    agent: &Agent,
+    blocks: &dyn BlockRunner,
+    clock: &dyn Clock,
+    shell: Option<&ShellManager>,
+) -> Result<usize, StoreError> {
     let mut n = 0;
     while let Some((cmd_id, env)) = store.inbox_next_pending_row()? {
         let result = match env {
-            Ok(env) => handle(&env, agent, store, blocks, clock),
+            Ok(env) => handle_with(&env, agent, store, blocks, clock, shell),
             Err(e) => {
                 // Poison row: retire it with a rejection so the rows behind
                 // it still run.
@@ -502,14 +740,21 @@ pub struct IntakeOptions {
     pub shutdown: CancellationToken,
 }
 
-async fn run_pending(store: &Arc<Store>, opts: &IntakeOptions) {
-    let (store, agent, blocks) = (
+async fn run_pending(store: &Arc<Store>, opts: &IntakeOptions, shell: Option<&ShellManager>) {
+    let (store, agent, blocks, shell) = (
         Arc::clone(store),
         Arc::clone(&opts.agent),
         Arc::clone(&opts.blocks),
+        shell.cloned(),
     );
     let done = tokio::task::spawn_blocking(move || {
-        process_pending(&store, &agent, blocks.as_ref(), &SystemClock)
+        process_pending_with(
+            &store,
+            &agent,
+            blocks.as_ref(),
+            &SystemClock,
+            shell.as_ref(),
+        )
     })
     .await;
     match done {
@@ -529,13 +774,26 @@ pub async fn intake(
     store: Arc<Store>,
     opts: IntakeOptions,
 ) {
+    intake_with(client, identity, store, opts, None).await;
+}
+
+/// [`intake`] with a shell manager that runs verified `ShellOpen` commands
+/// (`None` refuses them).
+pub async fn intake_with(
+    client: async_nats::Client,
+    identity: &Identity,
+    store: Arc<Store>,
+    opts: IntakeOptions,
+    shell: Option<ShellManager>,
+) {
+    let shell = shell.as_ref();
     let consumer = consumer_name(&identity.agent_id.to_string());
     let next_subject = format!("$JS.API.CONSUMER.MSG.NEXT.{CMD_STREAM}.{consumer}");
     let js = async_nats::jetstream::new(client.clone());
     let expires_ns = u64::try_from(PULL_EXPIRES.as_nanos()).unwrap_or(u64::MAX);
     let pull = serde_json::json!({ "batch": 1, "expires": expires_ns }).to_string();
 
-    run_pending(&store, &opts).await;
+    run_pending(&store, &opts, shell).await;
     let mut bound = false;
     let mut backoff = BACKOFF_MIN;
     loop {
@@ -628,7 +886,7 @@ pub async fn intake(
             // Stored already; a redelivery is rejected as a replay.
             tracing::warn!("command ack failed: {e}");
         }
-        run_pending(&store, &opts).await;
+        run_pending(&store, &opts, shell).await;
     }
 }
 

@@ -3,6 +3,7 @@
 pub mod actions;
 pub mod repo;
 pub mod scope;
+pub mod shell;
 pub mod telemetry;
 
 use std::time::{Duration, Instant};

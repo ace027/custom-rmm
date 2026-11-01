@@ -35,3 +35,18 @@ techlist; command key holds command. Thresholds 1. capability_ceiling [service, 
 - `cmd-unknown-block.env`: invokes `definition-unknown-block.env` (fails static validation).
 - `cmd-bad-param.env`: invokes `definition-param.env` with `wait_s = 9999` (fails param validation).
 - `cmd-good-param.env`: invokes `definition-param.env` with `wait_s = 30` (passes).
+
+## Shell (technician list signed by the catalog key, which holds the techlist role)
+
+Manifest console RP id `console.example.test`, origin `https://console.example.test`. Credentials are software Ed25519
+(COSE alg -8, crv 6) with AAGUID 0xAA x16; the tests sign assertions with these seeds.
+
+- `techlist.env`: seq 1 (issued NOW-86400, expires NOW+30 days). `tech_alice` scope [`client_0000000000000001`],
+cred id 0xA1 x16, seed 0x66; `tech_bob` scope [`client_0000000000000099`], cred id 0xB1 x16, seed 0x67;
+`tech_carol` scope [`*`], cred id 0xC1 x16, seed 0x68.
+- `techlist-removed.env`: seq 2, the same list without `tech_alice`. Applying `techlist.env` after it
+is a rollback.
+- `cmd-shell-server-only.env`: ShellOpen (cmd id 0x20 x16, issued NOW-10, expires NOW+590) with a
+valid grant for `tech_alice` (grant id 0x21 x16, cred 0xA1 x16, issued NOW-5, open_by NOW+60,
+max_duration 3600, shell `sh`) and an assertion with correct authenticator and client data
+but a signature the server cannot make (64 zero bytes): what the command key alone produces.

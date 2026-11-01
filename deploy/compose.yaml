@@ -99,9 +99,15 @@ services:
       RMM_AUTH_ALLOW_DEV: "1"
       RMM_AUTH_DEV_PUBKEY_FILE: /run/rmm-auth/dev-pub.pem
       RMM_AUTH_DEV_KEY_FILE: /run/rmm-auth/dev-key.pem
+      # Hardware-only WebAuthn registration (see deploy/.env.example). In dev
+      # the root PEM comes from the fake authenticator (plan 07-04); until it
+      # exists registration stays disabled (503).
+      RMM_WEBAUTHN_ATTESTATION_ROOTS: ${RMM_WEBAUTHN_ATTESTATION_ROOTS:-}
+      RMM_WEBAUTHN_AAGUIDS: ${RMM_WEBAUTHN_AAGUIDS:-}
     volumes:
       - ./dev/auth:/run/rmm-auth:ro
       - ./dev/trust:/run/rmm-trust:ro
+      - ./dev/webauthn:/run/rmm-webauthn:ro
     healthcheck:
       test: ["CMD", "/usr/local/bin/rmm-server", "healthcheck", "http://127.0.0.1:8080/healthz"]
       interval: 5s

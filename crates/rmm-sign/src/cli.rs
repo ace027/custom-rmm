@@ -20,8 +20,9 @@ use rmm_trust::sign::{Signer, sign_envelope};
 use rmm_trust::verify::{FixedClock, MemorySeqStore, TrustStore};
 use similar::TextDiff;
 
+use crate::aaguid;
 use crate::card_backend;
-use crate::drafts::{DocType, load_draft, pretty_payload};
+use crate::drafts::{DocType, check_techlist_hardware, load_draft, pretty_payload};
 use crate::file_backend::{self, FileError};
 
 /// Where the signing key lives.
@@ -128,6 +129,10 @@ enum Cmd {
         /// Overwrite --out if it exists.
         #[arg(long)]
         force: bool,
+        /// Also accept this authenticator AAGUID (32 hex digits) in a
+        /// techlist, besides the compiled YubiKey 5 list. Repeatable.
+        #[arg(long = "allow-aaguid", value_name = "HEX")]
+        allow_aaguid: Vec<String>,
     },
     /// Verify an envelope against root keys.
     Verify {
@@ -172,6 +177,7 @@ pub fn run() -> Result<()> {
             out,
             yes,
             force,
+            allow_aaguid,
         } => sign(&SignArgs {
             doc_type,
             input,
@@ -182,6 +188,7 @@ pub fn run() -> Result<()> {
             out,
             yes,
             force,
+            allow_aaguid,
         }),
         Cmd::Verify {
             roots,
@@ -364,15 +371,28 @@ struct SignArgs {
     out: PathBuf,
     yes: bool,
     force: bool,
+    allow_aaguid: Vec<String>,
 }
 
 fn sign(a: &SignArgs) -> Result<()> {
     let type_ = a.doc_type.type_string();
+    let extra_aaguids = a
+        .allow_aaguid
+        .iter()
+        .map(|s| aaguid::parse(s).map_err(|e| anyhow!("--allow-aaguid: {e}")))
+        .collect::<Result<Vec<_>>>()?;
+    if !extra_aaguids.is_empty() && a.doc_type != DocType::Techlist {
+        bail!("--allow-aaguid only applies to --type techlist");
+    }
     if a.out.exists() && !a.force {
         return Err(FileError::Exists(a.out.clone()).into());
     }
     let json = std::fs::read_to_string(&a.input)
         .with_context(|| format!("cannot read {}", a.input.display()))?;
+    if a.doc_type == DocType::Techlist {
+        check_techlist_hardware(&json, &extra_aaguids)
+            .with_context(|| format!("draft {}", a.input.display()))?;
+    }
     let draft =
         load_draft(a.doc_type, &json).with_context(|| format!("draft {}", a.input.display()))?;
 

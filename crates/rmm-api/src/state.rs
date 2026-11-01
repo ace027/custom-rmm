@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use ed25519_dalek::SigningKey;
 use sqlx::PgPool;
 
+use crate::attestation::AttestationConfig;
 use crate::auth::Authenticator;
 
 /// Compiled-in trust roots used to verify uploaded trust artifacts.
@@ -45,6 +46,30 @@ pub fn load_command_key(path: &std::path::Path) -> Result<SigningKey, String> {
     let seed = <[u8; 32]>::try_from(raw.as_slice())
         .map_err(|_| "command key must be a 32-byte seed".to_string())?;
     Ok(SigningKey::from_bytes(&seed))
+}
+
+fn load_attestation() -> Option<Arc<AttestationConfig>> {
+    match AttestationConfig::from_env() {
+        Ok(Some(cfg)) => {
+            tracing::info!(
+                roots = cfg.roots.len(),
+                aaguids = cfg.aaguids.len(),
+                "WebAuthn hardware attestation configured"
+            );
+            Some(Arc::new(cfg))
+        }
+        Ok(None) => {
+            tracing::warn!(
+                "RMM_WEBAUTHN_ATTESTATION_ROOTS or RMM_WEBAUTHN_AAGUIDS is unset; \
+                 technician credential registration is disabled"
+            );
+            None
+        }
+        Err(err) => {
+            tracing::error!(%err, "WebAuthn attestation config is invalid; registration is disabled");
+            None
+        }
+    }
 }
 
 /// Fixed-window per-key request limiter.
@@ -104,10 +129,16 @@ pub struct AppState {
     pub(crate) command_key_warned: Arc<AtomicBool>,
     /// Per-IP limiter for `/v1/enroll` (10 per minute).
     pub(crate) enroll_limiter: Arc<IpLimiter>,
+    /// WebAuthn attestation roots and AAGUID allowlist; `None` makes the
+    /// credential registration endpoints answer 503.
+    pub attestation: Option<Arc<AttestationConfig>>,
 }
 
 impl AppState {
-    /// Build the state with the default enrollment rate limit.
+    /// Build the state with the default enrollment rate limit. WebAuthn
+    /// attestation settings are read from `RMM_WEBAUTHN_ATTESTATION_ROOTS` and
+    /// `RMM_WEBAUTHN_AAGUIDS`; when unset or invalid, registration stays
+    /// disabled (fail closed).
     pub fn new(
         pool: PgPool,
         authenticator: Authenticator,
@@ -124,7 +155,15 @@ impl AppState {
             command_key: None,
             command_key_warned: Arc::new(AtomicBool::new(false)),
             enroll_limiter: Arc::new(IpLimiter::new(10, Duration::from_secs(60))),
+            attestation: load_attestation(),
         }
+    }
+
+    /// Set (or clear) the WebAuthn attestation configuration.
+    #[must_use]
+    pub fn with_attestation(mut self, cfg: Option<AttestationConfig>) -> Self {
+        self.attestation = cfg.map(Arc::new);
+        self
     }
 
     /// Set (or clear) the command signing key.

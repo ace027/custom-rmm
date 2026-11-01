@@ -112,16 +112,27 @@ fn manifest_json(roots: &[&Key], threshold: u8, tech: &Key) -> String {
     )
 }
 
-fn techlist_json(seq: u64, perms: &str) -> String {
+/// AAGUID of a YubiKey 5 (firmware 5.2/5.4).
+const YUBIKEY_5_AAGUID: &str = "ee882879721c491397753dfcce97072a";
+/// An AAGUID that is not a YubiKey 5.
+const OTHER_AAGUID: &str = "42424242424242424242424242424242";
+
+fn techlist_with_aaguid(seq: u64, perms: &str, aaguid: &str) -> String {
     format!(
         r#"{{
   "seq": {seq},
   "issued_at": {NOW},
   "expires_at": {exp},
-  "techs": [{{"tech_id": "alice", "client_scope": ["*"], "perms": ["{perms}"], "creds": []}}]
+  "techs": [{{"tech_id": "alice", "client_scope": ["*"], "perms": ["{perms}"], "creds": [
+    {{"cred_id": "c1c1c1c1", "alg": -7, "cose_pubkey": "a50102", "aaguid": "{aaguid}"}}
+  ]}}]
 }}"#,
         exp = NOW + 30 * DAY
     )
+}
+
+fn techlist_json(seq: u64, perms: &str) -> String {
+    techlist_with_aaguid(seq, perms, YUBIKEY_5_AAGUID)
 }
 
 fn write(dir: &Path, name: &str, content: &str) -> PathBuf {
@@ -720,4 +731,121 @@ fn keygen_command_refuses_to_overwrite_without_force() {
     assert_eq!(std::fs::read(&path).unwrap(), before);
     ok(&["keygen-command", "--out", s(&path), "--force"]);
     assert_ne!(std::fs::read(&path).unwrap(), before);
+}
+
+#[test]
+fn techlist_with_unknown_aaguid_is_refused() {
+    let dir = tmp();
+    let tech = keygen(&dir, "tech.age");
+    let draft = write(
+        &dir,
+        "t.json",
+        &techlist_with_aaguid(1, "shell", OTHER_AAGUID),
+    );
+    let out_path = dir.join("t.env");
+    let out = run(&sign_args(
+        "techlist",
+        s(&draft),
+        &backend(&tech),
+        s(&out_path),
+    ));
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("\"alice\""), "{err}");
+    assert!(
+        err.contains("42424242-4242-4242-4242-424242424242"),
+        "{err}"
+    );
+    assert!(!out_path.exists(), "nothing is written");
+
+    // The operator explicitly admits the authenticator.
+    let mut args = sign_args("techlist", s(&draft), &backend(&tech), s(&out_path));
+    add(&mut args, &["--allow-aaguid", OTHER_AAGUID]);
+    ok(&args);
+    assert!(out_path.exists());
+    // Dashed form and repeated flags work too.
+    let out2 = dir.join("t2.env");
+    let mut args = sign_args("techlist", s(&draft), &backend(&tech), s(&out2));
+    add(
+        &mut args,
+        &[
+            "--allow-aaguid",
+            "11111111-1111-1111-1111-111111111111",
+            "--allow-aaguid",
+            "42424242-4242-4242-4242-424242424242",
+        ],
+    );
+    ok(&args);
+}
+
+#[test]
+fn malformed_allow_aaguid_is_refused() {
+    let dir = tmp();
+    let tech = keygen(&dir, "tech.age");
+    let draft = write(&dir, "t.json", &techlist_json(1, "shell"));
+    for bad in [
+        "zz",
+        "4242",
+        "4242424242424242424242424242424242",
+        "g2424242424242424242424242424242",
+    ] {
+        let out_path = dir.join("t.env");
+        let mut args = sign_args("techlist", s(&draft), &backend(&tech), s(&out_path));
+        add(&mut args, &["--allow-aaguid", bad]);
+        let out = run(&args);
+        assert!(!out.status.success(), "{bad}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("--allow-aaguid"),
+            "{bad}"
+        );
+        assert!(!out_path.exists());
+    }
+}
+
+#[test]
+fn techlist_needs_hardware_credentials() {
+    let dir = tmp();
+    let tech = keygen(&dir, "tech.age");
+    let empty = techlist_json(1, "shell").replace(
+        &format!(
+            r#"[
+    {{"cred_id": "c1c1c1c1", "alg": -7, "cose_pubkey": "a50102", "aaguid": "{YUBIKEY_5_AAGUID}"}}
+  ]"#
+        ),
+        "[]",
+    );
+    assert!(empty.contains("\"creds\": []"), "{empty}");
+    let draft = write(&dir, "t.json", &empty);
+    let out = run(&sign_args(
+        "techlist",
+        s(&draft),
+        &backend(&tech),
+        s(&dir.join("a.env")),
+    ));
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("\"alice\" has no credentials"), "{err}");
+
+    // A truncated AAGUID is named with its technician.
+    let short = write(&dir, "s.json", &techlist_with_aaguid(1, "shell", "ee8828"));
+    let out = run(&sign_args(
+        "techlist",
+        s(&short),
+        &backend(&tech),
+        s(&dir.join("b.env")),
+    ));
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("\"alice\"") && err.contains("ee8828") && err.contains("16 bytes"),
+        "{err}"
+    );
+
+    // --allow-aaguid makes no sense for other document types.
+    let m = write(&dir, "m.json", &manifest_json(&[&tech], 1, &tech));
+    let mut args = sign_args("manifest", s(&m), &backend(&tech), s(&dir.join("m.env")));
+    add(&mut args, &["--allow-aaguid", OTHER_AAGUID]);
+    let out = run(&args);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("only applies to --type techlist"));
 }

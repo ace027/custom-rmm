@@ -28,10 +28,15 @@ tracing.workspace = true
 sha2.workspace = true
 ed25519-dalek.workspace = true
 nkeys.workspace = true
+p256.workspace = true
+ciborium.workspace = true
+x509-cert = { version = "0.3", default-features = false, features = ["pem", "std"] }
 
 [dev-dependencies]
 tokio.workspace = true
 tower.workspace = true
+p256 = { workspace = true, features = ["pkcs8", "alloc"] }
+x509-cert = { version = "0.3", default-features = false, features = ["pem", "std", "builder"] }
 
 [lints]
 workspace = true

@@ -1,7 +1,7 @@
 //! Parsing JSON drafts into typed trust documents and rendering decoded
 //! payloads back to pretty JSON.
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::ValueEnum;
 use rmm_proto::canonical::to_canonical_vec;
 use rmm_recipe::definition::{Definition, TYPE_DEFINITION};
@@ -11,6 +11,8 @@ use rmm_trust::envelope::{TYPE_COMMAND, TYPE_MANIFEST, TYPE_REVOCATIONS, TYPE_TE
 use rmm_trust::error::TrustError;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+
+use crate::aaguid;
 
 /// The document kinds this tool can sign.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -116,4 +118,39 @@ pub fn pretty_payload(ty: DocType, payload: &[u8]) -> Result<String> {
         DocType::Command => pretty::<Command>(payload),
         DocType::Definition => pretty_definition(payload),
     }
+}
+
+/// Hardware-only gate for technician lists: every technician needs at least
+/// one credential, and every credential's AAGUID must be 16 bytes and either
+/// a compiled YubiKey 5 AAGUID or one of `extra` (`--allow-aaguid`).
+pub fn check_techlist_hardware(json: &str, extra: &[[u8; 16]]) -> Result<()> {
+    let tl: TechnicianList = serde_json::from_str(json).context("invalid draft")?;
+    for tech in &tl.techs {
+        if tech.creds.is_empty() {
+            bail!(
+                "technician {:?} has no credentials; a techlist entry needs a hardware key",
+                tech.tech_id
+            );
+        }
+        for cred in &tech.creds {
+            let raw = &cred.aaguid.0;
+            let Ok(a) = <[u8; 16]>::try_from(raw.as_slice()) else {
+                bail!(
+                    "technician {:?}: credential aaguid {} is not 16 bytes",
+                    tech.tech_id,
+                    hex::encode(raw)
+                );
+            };
+            if !aaguid::is_allowed(&a, extra) {
+                bail!(
+                    "technician {:?}: credential aaguid {} is not an allowlisted hardware \
+                     authenticator (YubiKey 5 series, or pass --allow-aaguid {})",
+                    tech.tech_id,
+                    aaguid::format(&a),
+                    hex::encode(a)
+                );
+            }
+        }
+    }
+    Ok(())
 }

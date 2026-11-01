@@ -77,6 +77,52 @@
         ]
       }
     },
+    "/api/v1/admin/techlist-draft": {
+      "get": {
+        "tags": [
+          "technicians"
+        ],
+        "summary": "Export the technician list draft for offline signing with\n`rmm-sign sign --type techlist`. `seq` is the stored techlist's plus one,\n`issued_at` is now and `expires_at` 30 days later; review them before\nsigning. A technician's `client_scope` lists the clients assigned in\n`msp.technician_client` (empty means none).",
+        "operationId": "techlist_draft",
+        "responses": {
+          "200": {
+            "description": "TechnicianList JSON draft (byte fields as lowercase hex)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing RMM.Admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/agents/{agent_id}/actions": {
       "post": {
         "tags": [
@@ -541,6 +587,138 @@
         ]
       }
     },
+    "/api/v1/technicians/me/credentials/register/begin": {
+      "post": {
+        "tags": [
+          "technicians"
+        ],
+        "summary": "Start registering a hardware credential for the calling technician.",
+        "operationId": "register_begin",
+        "responses": {
+          "200": {
+            "description": "Creation options",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisterBeginResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Attestation or trust manifest not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/technicians/me/credentials/register/finish": {
+      "post": {
+        "tags": [
+          "technicians"
+        ],
+        "summary": "Finish registration: verify the hardware attestation and store the credential.",
+        "operationId": "register_finish",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterFinishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Credential registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisterFinishResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Credential id already registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Challenge unusable or attestation rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Attestation or trust manifest not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/trust/{kind}": {
       "put": {
         "tags": [
@@ -758,6 +936,24 @@
           }
         }
       },
+      "AuthenticatorSelection": {
+        "type": "object",
+        "description": "`authenticatorSelection` of the creation options.",
+        "required": [
+          "user_verification",
+          "resident_key"
+        ],
+        "properties": {
+          "resident_key": {
+            "type": "string",
+            "description": "Always `discouraged`."
+          },
+          "user_verification": {
+            "type": "string",
+            "description": "Always `required`."
+          }
+        }
+      },
       "CatalogEntry": {
         "type": "object",
         "description": "A stored catalog definition.",
@@ -904,6 +1100,120 @@
           "cmd_id": {
             "type": "string",
             "description": "Command id; poll `/api/v1/action-runs/{cmd_id}`."
+          }
+        }
+      },
+      "RegisterBeginResponse": {
+        "type": "object",
+        "description": "Options for `navigator.credentials.create`.",
+        "required": [
+          "challenge_id",
+          "challenge_b64url",
+          "rp_id",
+          "user_id_b64url",
+          "user_name",
+          "user_display_name",
+          "timeout_ms",
+          "attestation",
+          "authenticator_selection",
+          "pub_key_cred_params",
+          "exclude_credentials_b64url"
+        ],
+        "properties": {
+          "attestation": {
+            "type": "string",
+            "description": "Always `direct`."
+          },
+          "authenticator_selection": {
+            "$ref": "#/components/schemas/AuthenticatorSelection",
+            "description": "Authenticator requirements."
+          },
+          "challenge_b64url": {
+            "type": "string",
+            "description": "The challenge, unpadded base64url."
+          },
+          "challenge_id": {
+            "type": "string",
+            "description": "Pass back to `finish`."
+          },
+          "exclude_credentials_b64url": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Credentials already registered by this technician, unpadded base64url."
+          },
+          "pub_key_cred_params": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "description": "COSE algorithms: -7 (ES256), -8 (EdDSA)."
+          },
+          "rp_id": {
+            "type": "string",
+            "description": "Relying party id (the manifest's `console_rp_id`)."
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Timeout in milliseconds.",
+            "minimum": 0
+          },
+          "user_display_name": {
+            "type": "string",
+            "description": "User display name."
+          },
+          "user_id_b64url": {
+            "type": "string",
+            "description": "User handle, unpadded base64url."
+          },
+          "user_name": {
+            "type": "string",
+            "description": "User name (the technician id)."
+          }
+        }
+      },
+      "RegisterFinishRequest": {
+        "type": "object",
+        "description": "The authenticator's response to `navigator.credentials.create`.",
+        "required": [
+          "challenge_id",
+          "attestation_object_b64url",
+          "client_data_json_b64url"
+        ],
+        "properties": {
+          "attestation_object_b64url": {
+            "type": "string",
+            "description": "`response.attestationObject`, unpadded base64url."
+          },
+          "challenge_id": {
+            "type": "string",
+            "description": "`challenge_id` from `begin`."
+          },
+          "client_data_json_b64url": {
+            "type": "string",
+            "description": "`response.clientDataJSON`, unpadded base64url."
+          }
+        },
+        "additionalProperties": false
+      },
+      "RegisterFinishResponse": {
+        "type": "object",
+        "description": "A registered credential.",
+        "required": [
+          "cred_id_b64url",
+          "aaguid_hex"
+        ],
+        "properties": {
+          "aaguid_hex": {
+            "type": "string",
+            "description": "Authenticator AAGUID, lowercase hex."
+          },
+          "cred_id_b64url": {
+            "type": "string",
+            "description": "Credential id, unpadded base64url."
           }
         }
       }
