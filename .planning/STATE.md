@@ -2,12 +2,12 @@
 
 ## Current Position
 - **Phase**: 6 of 9 (executing)
-- **Status**: Phase 6 executing — Plan 06-01 complete
-- **Last Activity**: Plan 06-01 execution (2026-11-01)
+- **Status**: Phase 6 executing — Plan 06-03 complete
+- **Last Activity**: Plan 06-03 execution (2026-11-01)
 
 ## Progress
 ```
-[############........] 60% — 18/30 plans complete
+[#############.......] 66% — 20/30 plans complete
 ```
 
 ## Recent Decisions
@@ -75,3 +75,5 @@ Fix the failed plans and run `/triad:build` again (completed plans are kept), or
 (build started 2026-11-01)
 - Plan 06-01 (Wave 1): Recipe schema, validator, fixtures and phase dependencies — PARTIAL: none
 - Plan 06-01 (Wave 1): Recipe schema, validator, fixtures and phase dependencies — Complete
+- Plan 06-02 (Wave 2): Agent building blocks, command intake and executor — Complete
+- Plan 06-03 (Wave 2): Catalog, command issuing and result ingest — Complete
