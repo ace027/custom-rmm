@@ -556,8 +556,14 @@ pub async fn intake(
                 }
             }
         }
+        // A fresh inbox per pull, not the shared request multiplexer: JetStream
+        // delivers a pulled message under its stream subject
+        // (`agent.<id>.cmd`), which the multiplexer cannot match to a pending
+        // request (it routes by reply-subject prefix) and silently drops. A
+        // dedicated subscription is routed by subscription id instead.
         let request = async_nats::Request::new()
             .payload(pull.clone().into())
+            .inbox(client.new_inbox())
             .timeout(Some(PULL_EXPIRES + Duration::from_secs(5)));
         let reply = tokio::select! {
             () = opts.shutdown.cancelled() => return,
