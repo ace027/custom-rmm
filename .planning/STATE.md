@@ -1,13 +1,13 @@
 # Project State
 
 ## Current Position
-- **Phase**: 9 of 9 (planned)
-- **Status**: Phase 9 planned -- 2 plans across 2 waves
-- **Last Activity**: Phase 9 planning (2026-11-01)
+- **Phase**: 9 of 9 (executing)
+- **Status**: Phase 9 executing — Plan 09-01 complete
+- **Last Activity**: Plan 09-01 execution (2026-11-01)
 
 ## Progress
 ```
-[##################..] 93% — 28/30 plans complete
+[###################.] 96% — 29/30 plans complete
 ```
 
 ## Recent Decisions
@@ -99,3 +99,7 @@ Run `/triad:build` to execute Phase 9: MSI packaging
 - Plan 08-01 (Wave 1): Signed releases, artifact hosting and trust/release distribution — Complete with Warnings
 - Plan 08-02 (Wave 2): Watchdog: A/B slots, verified apply, health rollback and supervision — Complete
 - Plan 08-03 (Wave 3): Agent update client, health signal and end-to-end update — Complete with Warnings
+
+## Phase 9 Results
+(build started 2026-11-01)
+- Plan 09-01 (Wave 1): WiX package, xtask msi and agent enrollment flag — Complete
