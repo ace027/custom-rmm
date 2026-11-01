@@ -220,12 +220,14 @@ Q2=$(outbox_len 2)
 # (4) Checked while rows are queued. The queued subjects hold the agent id in
 # clear (the control proves the files are being searched); no metric name may
 # appear anywhere in the database file or its WAL.
-control=$("${SUDO[@]}" cat "$DIR"/agent-store.db* | grep -a -F -c -- "$AG" || true)
+# The state dir is root-only, so the glob must expand inside sudo.
+store_bytes() { "${SUDO[@]}" sh -c 'cat "$1"/agent-store.db*' sh "$DIR"; }
+control=$(store_bytes | grep -a -F -c -- "$AG" || true)
 [[ $control -gt 0 ]] || fail "control: agent id not found in the store files, grep proves nothing"
 names=$(q "select distinct metric from ts_private.metrics where device_id = '$DEV'")
 [[ -n $names ]] || fail "no metric names for device $DEV"
 while IFS= read -r name; do
-  hits=$("${SUDO[@]}" cat "$DIR"/agent-store.db* | grep -a -F -c -- "$name" || true)
+  hits=$(store_bytes | grep -a -F -c -- "$name" || true)
   [[ $hits -eq 0 ]] || fail "metric name '$name' appears in clear in agent-store.db ($hits lines)"
 done <<<"$names"
 pass "(4) none of $(wc -l <<<"$names") metric names appear in clear in agent-store.db (control: $control lines with the agent id)"
