@@ -76,8 +76,8 @@
 ## Escalations
 | # | Severity | Type | Decision | Status | Resolution |
 |---|----------|------|----------|--------|------------|
-| 1 | blocker | out-of-scope fix | Fix the agent command pull in crates/ (rmm-agent-core commands.rs intake, or the agent NATS permissions in rmm-server natsjwt.rs). | pending | INVALID: type "out-of-scope fix" is not one of architecture, dependency, scope, schema, api, deletion, infrastructure, quality |
-| 2 | blocker | quality | Resolve: $ RMM_HTTPS_PORT=8443 scripts/e2e-actions.sh (exit 1) | pending |  |
+| 1 | blocker | out-of-scope fix | Fix the agent command pull in crates/ (rmm-agent-core commands.rs intake, or the agent NATS permissions in rmm-server natsjwt.rs). | approved | Same root cause as #2; fixed in commands.rs (user-approved). |
+| 2 | blocker | quality | Resolve: $ RMM_HTTPS_PORT=8443 scripts/e2e-actions.sh (exit 1) | approved | User approved the command intake fix. Root cause: the agent's MSG.NEXT pull used async-nats' shared request multiplexer, which drops JetStream deliveries arriving under the stream subject. Fixed with a dedicated inbox per pull; regression test tests/intake_nats.rs added. e2e-actions checks 1-4 now pass locally. Re-run 06-04 verification. |
 
 - #1 context: The CMD consumer delivers the command, but the agent's MSG.NEXT request times out and rebinds every 36 s, so no result is produced. e2e-actions.sh cannot pass until this is fixed. This is a possible 06-02 defect found by the e2e run, and crates/ is forbidden to me.
 - #2 context: Verification failed (RMM_HTTPS_PORT=8443 scripts/e2e-actions.sh); a BLOCKER is not auto-fixed.
