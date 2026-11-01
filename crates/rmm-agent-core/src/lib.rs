@@ -3,6 +3,7 @@
 
 pub mod enroll;
 pub mod identity;
+pub mod store;
 pub mod telemetry;
 pub mod transport;
 

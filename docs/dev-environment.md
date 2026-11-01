@@ -171,6 +171,44 @@ WHERE device_id = '<device-uuid>' ORDER BY time DESC LIMIT 20; COMMIT;"
 and event, metrics, tenant isolation of `metrics_v`, a RAM change becoming an
 event, and ingest keeping up with a fast agent and a 10000 sample burst.
 
+`scripts/e2e-offline.sh` stops nginx for 60 s while an agent runs with fast
+intervals, restarts it, and checks that every queued sample arrives, that
+`ts_private.metrics` has no duplicate `(time, metric)` rows, that a hard-killed
+agent restarted while offline still delivers its queue exactly once, and that
+`agent-store.db` holds no metric name in clear.
+
+## Agent local store and offline queue
+
+The agent keeps an encrypted SQLite store in its state dir (default:
+platform specific; `--state-dir` overrides it):
+
+- `agent-store.db` (plus `-wal` and `-shm`): the outbox of metric and
+  inventory messages not yet acknowledged by the server, the command replay
+  cache, trust sequence floors and the trust and policy caches. Values are
+  sealed with XChaCha20-Poly1305; row ids, subjects, priorities, timestamps and
+  sizes are readable.
+- `store.key`: the random 32-byte store key, protected like `agent.key`
+  (0600 on Unix, DPAPI on Windows). If the database exists without this file
+  the agent refuses to start rather than begin a new store; delete both files
+  to reset a dev agent.
+
+Metrics and inventory are written to the outbox first and deleted only after the
+JetStream ack, so an outage or agent restart loses nothing. The outbox holds up
+to 50000 rows or 64 MiB; when full the oldest metric batches are dropped first
+(inventory is kept) and the drops are logged. After a reconnect it drains by
+priority (inventory, then metrics) and then by age. Ingest dedupes by `msg_id`
+in `ts_private.ingested_msg` (kept 7 days), so re-sent rows are written once.
+
+Inspect the queue length (row counts are not secret; payloads are):
+
+```
+sudo python3 -c 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); \
+print(c.execute("select priority, count(*) from outbox group by priority").fetchall())' \
+  <state-dir>/agent-store.db
+```
+
+Or with the sqlite3 CLI: `sudo sqlite3 <state-dir>/agent-store.db 'select count(*) from outbox'`.
+
 ## Technician tokens in dev
 
 The api service runs with `RMM_AUTH_ALLOW_DEV=1`, audience `api://rmm-dev`,

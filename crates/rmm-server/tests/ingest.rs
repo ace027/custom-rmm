@@ -463,11 +463,12 @@ fn first_inventory_writes_the_columns_and_one_event() {
             "cpu_cores",
             "ram_bytes",
             "disk_total_bytes",
-            "disk_free_bytes",
             "last_boot",
         ] {
             assert!(after.contains_key(k), "after lacks {k}");
         }
+        // Free space is volatile: stored on the device, never diffed into an event.
+        assert!(!after.contains_key("disk_free_bytes"));
         assert_eq!(after["ram_bytes"], 8i64 << 30);
         assert_eq!(after["disk_total_bytes"], 300);
     });
@@ -541,6 +542,63 @@ fn metrics_land_under_the_agents_client_and_device() {
         assert_eq!(out, acked());
         assert_eq!(Stats::get(&p.stats.metric_rows), 3);
         assert_eq!(Stats::get(&p.stats.samples_dropped), 2);
+    });
+}
+
+#[test]
+fn the_same_metric_batch_twice_writes_its_rows_once() {
+    let Some(url) = database_url() else { return };
+    block(async {
+        let s = seed(&url).await;
+        let p = processor(&url).await;
+        let now = now_ms();
+        let batch = metric_batch(vec![
+            sample(now - 2000, "cpu.usage_pct", 10.0),
+            sample(now - 1000, "cpu.usage_pct", 20.0),
+        ]);
+        let payload = encode(&batch).unwrap();
+        let subj = subject(s.client, s.agent, "metric");
+        assert_eq!(send(&p, &subj, &payload).await, acked());
+        assert_eq!(send(&p, &subj, &payload).await, acked());
+        assert_eq!(Stats::get(&p.stats.metric_rows), 2);
+        assert_eq!(Stats::get(&p.stats.duplicates), 1);
+
+        // The same id twice inside one batch is also written once.
+        let batch2 = metric_batch(vec![sample(now, "cpu.usage_pct", 30.0)]);
+        let payload2 = encode(&batch2).unwrap();
+        let out = p
+            .process_batch(&[
+                Incoming {
+                    subject: &subj,
+                    payload: &payload2,
+                },
+                Incoming {
+                    subject: &subj,
+                    payload: &payload2,
+                },
+            ])
+            .await;
+        assert_eq!(out.acked, vec![0, 1]);
+        assert_eq!(Stats::get(&p.stats.metric_rows), 3);
+        assert_eq!(Stats::get(&p.stats.duplicates), 2);
+    });
+}
+
+#[test]
+fn a_rejected_message_does_not_claim_its_id() {
+    let Some(url) = database_url() else { return };
+    block(async {
+        let s = seed(&url).await;
+        let p = processor(&url).await;
+        let batch = metric_batch(vec![sample(now_ms(), "cpu.usage_pct", 1.0)]);
+        let payload = encode(&batch).unwrap();
+        // Wrong subject client: termed, and the id stays free for the real agent.
+        let wrong = subject(Uuid::new_v4(), s.agent, "metric");
+        assert_eq!(send(&p, &wrong, &payload).await, termed());
+        let right = subject(s.client, s.agent, "metric");
+        assert_eq!(send(&p, &right, &payload).await, acked());
+        assert_eq!(Stats::get(&p.stats.metric_rows), 1);
+        assert_eq!(Stats::get(&p.stats.duplicates), 0);
     });
 }
 

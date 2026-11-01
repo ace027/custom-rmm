@@ -24,6 +24,13 @@ tokio-util.workspace = true
 tracing.workspace = true
 ciborium.workspace = true
 ed25519-dalek.workspace = true
+rusqlite.workspace = true
+chacha20poly1305 = { workspace = true, features = ["zeroize"] }
+zeroize.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+rusqlite.workspace = true
 
 [lints]
 workspace = true

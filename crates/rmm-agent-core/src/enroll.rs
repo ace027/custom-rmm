@@ -1,7 +1,6 @@
 //! Enrollment client: generate the device key, prove possession of it to the
 //! server with a one-time token, and persist the identity and trust bundle.
 
-use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -11,9 +10,10 @@ use rand::TryRng;
 use rmm_platform::{KeyStore, Platform};
 use rmm_proto::enroll::{EnrollRequest, EnrollResponse, TrustBundle};
 use rmm_trust::keys::PublicKey;
-use rmm_trust::store::{Clock, DocKind, SeqStore, TrustStore};
+use rmm_trust::store::{Clock, DocKind, TrustStore};
 
 use crate::identity::{self, Identity};
+use crate::store::{STORE_KEY_FILE, Store};
 
 /// Comma-separated hex Ed25519 root public keys compiled into the agent.
 const ROOT_PUBKEYS: Option<&str> = option_env!("RMM_ROOT_PUBKEYS");
@@ -180,33 +180,22 @@ impl Clock for SystemClock {
     }
 }
 
-#[derive(Default)]
-struct MemSeq(BTreeMap<DocKind, (u64, [u8; 32])>);
-
-impl SeqStore for MemSeq {
-    fn get(&self, kind: DocKind) -> Option<(u64, [u8; 32])> {
-        self.0.get(&kind).copied()
-    }
-    fn put(&mut self, kind: DocKind, seq: u64, content_id: [u8; 32]) {
-        self.0.insert(kind, (seq, content_id));
-    }
-}
-
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
 }
 
-/// Verify the bundle against the compiled-in roots. An empty bundle carries
-/// nothing to verify; a non-empty one needs configured roots (fail closed).
-fn verify_bundle(bundle: &TrustBundle) -> Result<(), EnrollError> {
+/// Verify the bundle against the compiled-in roots, using the persisted
+/// sequence floors of `db`. An empty bundle carries nothing to verify; a
+/// non-empty one needs configured roots (fail closed).
+fn verify_bundle(bundle: &TrustBundle, db: &Store) -> Result<(), EnrollError> {
     if bundle.manifest.is_none() && bundle.revocations.is_none() && bundle.techlist.is_none() {
         return Ok(());
     }
     let (roots, threshold) = compiled_roots()?;
     let mut store = TrustStore::new(roots, threshold);
-    let mut seq = MemSeq::default();
+    let mut seq = db;
     let trust = |e: rmm_trust::error::TrustError| EnrollError::Trust(e.to_string());
     let Some(manifest) = &bundle.manifest else {
         return Err(EnrollError::Trust(
@@ -225,6 +214,26 @@ fn verify_bundle(bundle: &TrustBundle) -> Result<(), EnrollError> {
         store
             .apply_techlist(t, &SystemClock, &mut seq)
             .map_err(trust)?;
+    }
+    if db.seq_write_failed() {
+        return Err(EnrollError::Local(
+            "could not persist trust sequence floors".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Cache the verified envelopes in the encrypted store.
+fn save_trust(bundle: &TrustBundle, db: &Store) -> Result<(), EnrollError> {
+    let local = |e: crate::store::StoreError| EnrollError::Local(e.to_string());
+    for (kind, env) in [
+        (DocKind::Manifest, &bundle.manifest),
+        (DocKind::Revocations, &bundle.revocations),
+        (DocKind::Techlist, &bundle.techlist),
+    ] {
+        if let Some(env) = env {
+            db.trust_put(kind, env).map_err(local)?;
+        }
     }
     Ok(())
 }
@@ -359,7 +368,13 @@ async fn run_enrollment(
         .await
         .map_err(|e| EnrollError::BadResponse(e.without_url().to_string()))?;
 
-    verify_bundle(&body.trust)?;
+    let db = Store::open(
+        &opts.state_dir,
+        rmm_platform::keystore_named(&opts.state_dir, STORE_KEY_FILE).as_ref(),
+    )
+    .map_err(|e| EnrollError::Local(e.to_string()))?;
+    verify_bundle(&body.trust, &db)?;
+    save_trust(&body.trust, &db)?;
 
     let ident = Identity {
         agent_id: body.agent_id,

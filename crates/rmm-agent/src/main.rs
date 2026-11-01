@@ -2,12 +2,15 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use rmm_agent_core::enroll::{self, EnrollError, EnrollOptions};
 use rmm_agent_core::identity;
+use rmm_agent_core::store::{STORE_KEY_FILE, Store};
 use rmm_agent_core::telemetry::{self as agent_telemetry, CancellationToken, Intervals};
 use rmm_agent_core::transport::{self, ConnState};
+use tokio::sync::Notify;
 
 const EXIT_FAILURE: u8 = 1;
 const EXIT_ALREADY_ENROLLED: u8 = 2;
@@ -134,6 +137,19 @@ async fn run(state_dir: Option<PathBuf>, once: bool) -> u8 {
             return EXIT_FAILURE;
         }
     };
+    let store = if once {
+        None
+    } else {
+        let key = rmm_platform::keystore_named(&dir, STORE_KEY_FILE);
+        match Store::open(&dir, key.as_ref()) {
+            Ok(s) => Some(Arc::new(s)),
+            Err(e) => {
+                tracing::error!("open local store: {e}");
+                return EXIT_FAILURE;
+            }
+        }
+    };
+    let reconnect = Arc::new(Notify::new());
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let ca = extra_ca();
     let client = transport::connect_observed(&ident, &seed, ca.as_deref(), tx).await;
@@ -147,10 +163,11 @@ async fn run(state_dir: Option<PathBuf>, once: bool) -> u8 {
     };
     tracing::info!(agent_id = %ident.agent_id, url = %ident.nats_url, "connecting");
     let shutdown = CancellationToken::new();
-    let telemetry_task = (!once).then(|| {
+    let telemetry_task = store.map(|store| {
         let client = client.clone();
         let ident = ident.clone();
         let token = shutdown.clone();
+        let reconnect = Arc::clone(&reconnect);
         tokio::spawn(async move {
             let platform = rmm_platform::current();
             if let Err(e) = agent_telemetry::run_telemetry(
@@ -158,6 +175,8 @@ async fn run(state_dir: Option<PathBuf>, once: bool) -> u8 {
                 &ident,
                 platform,
                 Intervals::from_env_debug(),
+                store,
+                reconnect,
                 token,
             )
             .await
@@ -171,6 +190,7 @@ async fn run(state_dir: Option<PathBuf>, once: bool) -> u8 {
             state = rx.recv() => match state {
                 Some(ConnState::Connected) => {
                     tracing::info!("nats connected");
+                    reconnect.notify_one();
                     if once {
                         break 0;
                     }

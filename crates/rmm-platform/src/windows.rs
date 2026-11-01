@@ -1,4 +1,4 @@
-use crate::keystore::KEY_FILE;
+use crate::keystore::validate_name;
 use crate::smbios::parse_rsmb;
 use crate::{HwFacts, KeyStore, Platform, PlatformError};
 use ::windows::Win32::Foundation::{
@@ -197,27 +197,30 @@ fn create_protected_dir(dir: &Path) -> Result<(), PlatformError> {
 }
 
 /// Agent key protected with DPAPI in the SYSTEM user scope (no
-/// `CRYPTPROTECT_LOCAL_MACHINE`), stored in `agent.key` under the state dir.
+/// `CRYPTPROTECT_LOCAL_MACHINE`), stored in the named file under the state dir.
 #[derive(Debug)]
 pub(crate) struct DpapiKeyStore {
     dir: PathBuf,
+    name: String,
 }
 
 impl DpapiKeyStore {
-    pub(crate) fn new(dir: &Path) -> Self {
+    pub(crate) fn new(dir: &Path, name: &str) -> Self {
         Self {
             dir: dir.to_path_buf(),
+            name: name.to_owned(),
         }
     }
 
-    fn path(&self) -> PathBuf {
-        self.dir.join(KEY_FILE)
+    fn path(&self) -> Result<PathBuf, PlatformError> {
+        validate_name(&self.name)?;
+        Ok(self.dir.join(&self.name))
     }
 }
 
 impl KeyStore for DpapiKeyStore {
     fn load(&self) -> Result<Option<[u8; 32]>, PlatformError> {
-        let blob = match fs::read(self.path()) {
+        let blob = match fs::read(self.path()?) {
             Ok(b) => b,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(os_err("read key file", e)),
@@ -259,6 +262,7 @@ impl KeyStore for DpapiKeyStore {
     }
 
     fn store(&self, seed: &[u8; 32]) -> Result<(), PlatformError> {
+        let path = self.path()?;
         create_protected_dir(&self.dir)?;
         let input = CRYPT_INTEGER_BLOB {
             cbData: 32,
@@ -283,7 +287,7 @@ impl KeyStore for DpapiKeyStore {
         // SAFETY: on success `out` describes `cbData` readable bytes.
         let blob = unsafe { std::slice::from_raw_parts(out.pbData, out.cbData as usize) };
 
-        let tmp = self.dir.join(format!("{KEY_FILE}.tmp"));
+        let tmp = self.dir.join(format!("{}.tmp", self.name));
         let write = || -> std::io::Result<()> {
             let mut f = fs::File::create(&tmp)?;
             f.write_all(blob)?;
@@ -293,7 +297,7 @@ impl KeyStore for DpapiKeyStore {
             let _ = fs::remove_file(&tmp);
             os_err("write key file", e)
         })?;
-        let (from, to) = (wide(&tmp), wide(&self.path()));
+        let (from, to) = (wide(&tmp), wide(&path));
         // SAFETY: both paths are NUL-terminated and outlive the call.
         unsafe {
             MoveFileExW(
@@ -309,7 +313,7 @@ impl KeyStore for DpapiKeyStore {
     }
 
     fn delete(&self) -> Result<(), PlatformError> {
-        match fs::remove_file(self.path()) {
+        match fs::remove_file(self.path()?) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(os_err("delete key file", e)),
@@ -376,6 +380,7 @@ impl Platform for Current {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::keystore::KEY_FILE;
 
     fn scratch(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("rmm-ks-{name}-{}", std::process::id()));
@@ -387,10 +392,10 @@ mod tests {
     #[test]
     fn dpapi_round_trip() {
         let dir = scratch("dpapi");
-        let ks = DpapiKeyStore::new(&dir);
+        let ks = DpapiKeyStore::new(&dir, KEY_FILE);
         assert_eq!(ks.load().expect("load"), None);
         ks.store(&[5; 32]).expect("store");
-        let on_disk = fs::read(ks.path()).expect("read");
+        let on_disk = fs::read(ks.path().expect("path")).expect("read");
         assert_ne!(
             on_disk.as_slice(),
             [5u8; 32].as_slice(),
@@ -407,14 +412,14 @@ mod tests {
     #[test]
     fn corrupted_blob_is_an_error() {
         let dir = scratch("corrupt");
-        let ks = DpapiKeyStore::new(&dir);
+        let ks = DpapiKeyStore::new(&dir, KEY_FILE);
         ks.store(&[5; 32]).expect("store");
-        let mut blob = fs::read(ks.path()).expect("read");
+        let mut blob = fs::read(ks.path().expect("path")).expect("read");
         let mid = blob.len() / 2;
         blob[mid] ^= 0xff;
-        fs::write(ks.path(), &blob).expect("corrupt");
+        fs::write(ks.path().expect("path"), &blob).expect("corrupt");
         assert!(ks.load().is_err());
-        fs::write(ks.path(), b"junk").expect("junk");
+        fs::write(ks.path().expect("path"), b"junk").expect("junk");
         assert!(ks.load().is_err());
         let _ = fs::remove_dir_all(&dir);
     }

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into ts_private.ingested_msg (msg_id) select * from unnest($1::uuid[]) on conflict do nothing returning msg_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "msg_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2f785407e3c2ad1380a712b924afe899984d82ffacdec03e8a7739d5f4d2d094"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from ts_private.ingested_msg where received_at < $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a8f83287e0855f6f1f18edaf2d9ef2ba05d11c4c947032515e24415d783bda6e"
+}

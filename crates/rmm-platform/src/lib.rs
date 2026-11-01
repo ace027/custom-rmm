@@ -4,7 +4,7 @@ pub mod collect;
 mod keystore;
 pub mod smbios;
 
-pub use keystore::{KeyStore, default_state_dir, keystore};
+pub use keystore::{KeyStore, default_state_dir, keystore, keystore_named};
 pub use rmm_proto::enroll::HwFacts;
 
 #[cfg(target_os = "linux")]
