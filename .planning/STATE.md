@@ -1,8 +1,8 @@
 # Project State
 
 ## Current Position
-- **Phase**: 6 of 9 (executing)
-- **Status**: Phase 6 executing — Plan 06-01 failed
+- **Phase**: 6 of 9 (partial — 1 plan(s) failed)
+- **Status**: Phase 6 partial — 06-01 failed, stopped after wave 1, review needed
 - **Last Activity**: Plan 06-01 execution (2026-11-01)
 
 ## Progress
@@ -28,7 +28,7 @@
 - Phase 4 throughput check split (user-approved): real agent at 50 ms interval must land >= 40 batches in 20 s (sysinfo CPU sampling blocks 200 ms per sample); ingest capacity proven by a 10000-sample burst within 60 s
 
 ## Next Action
-Run `/triad:build` to execute Phase 6: Signed commands and first catalog action
+Fix the failed plans and run `/triad:build` again (completed plans are kept), or run `/triad:review`
 
 ## Phase 1 Results
 (build started 2026-10-31)
