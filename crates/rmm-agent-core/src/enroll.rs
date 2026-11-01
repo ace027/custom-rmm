@@ -368,13 +368,22 @@ async fn run_enrollment(
         .await
         .map_err(|e| EnrollError::BadResponse(e.without_url().to_string()))?;
 
-    let db = Store::open(
-        &opts.state_dir,
-        rmm_platform::keystore_named(&opts.state_dir, STORE_KEY_FILE).as_ref(),
-    )
-    .map_err(|e| EnrollError::Local(e.to_string()))?;
-    verify_bundle(&body.trust, &db)?;
-    save_trust(&body.trust, &db)?;
+    let previous =
+        identity::load(&opts.state_dir).map_err(|e| EnrollError::Local(e.to_string()))?;
+    // The store is SQLite backed and blocking: keep it off the executor.
+    let (state_dir, trust) = (opts.state_dir.clone(), body.trust.clone());
+    let db = tokio::task::spawn_blocking(move || {
+        let db = Store::open(
+            &state_dir,
+            rmm_platform::keystore_named(&state_dir, STORE_KEY_FILE).as_ref(),
+        )
+        .map_err(|e| EnrollError::Local(e.to_string()))?;
+        verify_bundle(&trust, &db)?;
+        save_trust(&trust, &db)?;
+        Ok::<_, EnrollError>(db)
+    })
+    .await
+    .map_err(|e| EnrollError::Local(e.to_string()))??;
 
     let ident = Identity {
         agent_id: body.agent_id,
@@ -387,6 +396,18 @@ async fn run_enrollment(
     let dir: &Path = &opts.state_dir;
     identity::save_trust(dir, &body.trust).map_err(|e| EnrollError::Local(e.to_string()))?;
     identity::save(dir, &ident).map_err(|e| EnrollError::Local(e.to_string()))?;
+    // Queued rows carry subjects of the previous identity; the new per-agent
+    // credentials cannot publish to them, so they would be retried forever.
+    if previous.is_some_and(|p| p.agent_id != ident.agent_id) {
+        let purged = tokio::task::spawn_blocking(move || db.outbox_clear())
+            .await
+            .map_err(|e| EnrollError::Local(e.to_string()))?
+            .map_err(|e| EnrollError::Local(e.to_string()))?;
+        tracing::warn!(
+            purged,
+            "re-enrolled with a new agent id; purged stale outbox"
+        );
+    }
     Ok(Enrolled {
         identity: ident,
         status: body.status,

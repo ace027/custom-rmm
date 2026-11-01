@@ -9,6 +9,12 @@
 #       queued, exactly once
 #   (4) agent-store.db and its WAL hold no metric name in clear
 #
+# Scale-down: the success criterion is a 1 hour outage; this script uses a 60 s
+# outage at a 1 s metric interval (about 60 batches). It does not cover a
+# backlog above MAX_IN_FLIGHT (200), inventory queued during an outage, or
+# command results (not implemented yet). Those paths are covered only by unit
+# tests with a fake sink.
+#
 # Same conventions as scripts/e2e-telemetry.sh: the agent runs as root in a
 # private mount namespace with a fake /sys/class/dmi. Needs root or
 # passwordless sudo, docker, cargo, curl and python3.

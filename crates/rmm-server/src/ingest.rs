@@ -726,7 +726,10 @@ fn consumer_config() -> consumer::pull::Config {
         durable_name: Some(CONSUMER.to_owned()),
         ack_policy: consumer::AckPolicy::Explicit,
         ack_wait: Duration::from_secs(30),
-        max_deliver: 5,
+        // Unlimited: a long database outage must not exhaust the delivery
+        // budget, because the agent already deleted its copy on the stream ack.
+        // Permanently bad messages are terminated explicitly instead.
+        max_deliver: -1,
         ..Default::default()
     }
 }
