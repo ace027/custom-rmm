@@ -37,6 +37,9 @@ use rmm_proto::telemetry::{
 use serde_json::Value;
 use uuid::Uuid;
 
+#[path = "results.rs"]
+pub mod results;
+
 /// Name of the JetStream stream holding all telemetry.
 pub const STREAM: &str = "TELEM";
 /// Name of the durable pull consumer.
@@ -136,15 +139,19 @@ pub struct Health {
     pub consumer_ok: AtomicBool,
     /// Unix time of the last successful database write or check (0 = never).
     pub db_ok_at: AtomicU64,
+    /// The result consumer could not be set up or has gone missing.
+    pub results_failed: AtomicBool,
 }
 
 impl Health {
-    /// Healthy when NATS is connected, the consumer exists and the database
-    /// answered within the last 30 s.
+    /// Healthy when NATS is connected, the consumers exist (the result
+    /// consumer counts once it has failed) and the database answered within
+    /// the last 30 s.
     pub fn healthy(&self, now: u64) -> bool {
         let db = self.db_ok_at.load(Ordering::Relaxed);
         self.nats_up.load(Ordering::Relaxed)
             && self.consumer_ok.load(Ordering::Relaxed)
+            && !self.results_failed.load(Ordering::Relaxed)
             && db != 0
             && now.saturating_sub(db) <= DB_MAX_AGE_SECS
     }
@@ -891,6 +898,17 @@ async fn worker(cfg: Arc<Config>, health: Arc<Health>) {
         }
     };
     tracing::info!("ingest consuming");
+    let results_db = loop {
+        match Db::connect(&cfg.database_url).await {
+            Ok(db) => break db,
+            Err(err) => {
+                tracing::warn!(%err, "database connect failed, retrying");
+                tokio::time::sleep(backoff).await;
+                backoff = next(backoff);
+            }
+        }
+    };
+    tokio::spawn(results::run(js.clone(), results_db, health.clone()));
     let proc = Arc::new(Processor::new(db, health));
     tokio::spawn(check_loop(client, js, proc.clone()));
     tokio::spawn(log_loop(proc.clone()));

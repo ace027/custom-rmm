@@ -10,6 +10,180 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/v1/action-runs/{cmd_id}": {
+      "get": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Read an action run.",
+        "operationId": "get_action_run",
+        "parameters": [
+          {
+            "name": "cmd_id",
+            "in": "path",
+            "description": "Command id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRunResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing RMM.Admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/agents/{agent_id}/actions": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Invoke a catalog definition on an agent.",
+        "operationId": "issue_action",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "description": "Agent id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Command signed, recorded and published",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing RMM.Admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Agent is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unknown definition or invalid parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Command key missing or command not published",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/agents/{agent_id}/revoke": {
       "post": {
         "tags": [
@@ -64,6 +238,87 @@
           },
           "503": {
             "description": "Agent revoked but the kick was not published; retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/catalog": {
+      "put": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Upload a catalog-signed definition envelope.",
+        "operationId": "put_catalog",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Definition already stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEntry"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Definition stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEntry"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing RMM.Admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Not catalog-signed, invalid or revoked",
             "content": {
               "application/json": {
                 "schema": {
@@ -461,6 +716,83 @@
   },
   "components": {
     "schemas": {
+      "ActionRunResponse": {
+        "type": "object",
+        "description": "State of an action run.",
+        "required": [
+          "cmd_id",
+          "status",
+          "stages",
+          "created_at"
+        ],
+        "properties": {
+          "cmd_id": {
+            "type": "string",
+            "description": "Command id."
+          },
+          "created_at": {
+            "type": "string",
+            "description": "Creation time (RFC 3339)."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Completion time (RFC 3339), once the agent reported."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Rejection reason, when rejected."
+          },
+          "stages": {
+            "type": "object",
+            "description": "Per-stage outcomes reported by the agent."
+          },
+          "status": {
+            "type": "string",
+            "description": "`queued`, `succeeded`, `failed`, `rolled_back`, `rejected` or `expired`."
+          }
+        }
+      },
+      "CatalogEntry": {
+        "type": "object",
+        "description": "A stored catalog definition.",
+        "required": [
+          "content_id",
+          "id",
+          "version",
+          "capability",
+          "new"
+        ],
+        "properties": {
+          "capability": {
+            "type": "string",
+            "description": "Capability group."
+          },
+          "content_id": {
+            "type": "string",
+            "description": "Hex SHA-256 of the definition payload."
+          },
+          "id": {
+            "type": "string",
+            "description": "Dotted action name."
+          },
+          "new": {
+            "type": "boolean",
+            "description": "False when the same definition was already stored."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Definition version.",
+            "minimum": 0
+          }
+        }
+      },
       "CreateTokenRequest": {
         "type": "object",
         "description": "Request to mint an enrollment token.",
@@ -542,6 +874,36 @@
           "status": {
             "type": "string",
             "description": "Always `ok` when the process is serving."
+          }
+        }
+      },
+      "IssueRequest": {
+        "type": "object",
+        "description": "Request to invoke a catalog definition on one agent.",
+        "required": [
+          "definition_content_id"
+        ],
+        "properties": {
+          "definition_content_id": {
+            "type": "string",
+            "description": "Hex content id of an uploaded definition."
+          },
+          "params": {
+            "type": "object",
+            "description": "Parameters, validated against the definition."
+          }
+        }
+      },
+      "IssueResponse": {
+        "type": "object",
+        "description": "An accepted command.",
+        "required": [
+          "cmd_id"
+        ],
+        "properties": {
+          "cmd_id": {
+            "type": "string",
+            "description": "Command id; poll `/api/v1/action-runs/{cmd_id}`."
           }
         }
       }

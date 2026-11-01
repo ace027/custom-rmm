@@ -41,11 +41,22 @@ pub async fn build_router() -> Result<Router> {
     let nats_public_url = crate::env_or("RMM_NATS_PUBLIC_URL", "wss://localhost/nats");
     let nats = connect_nats().await?;
 
-    Ok(rmm_api::router(AppState::new(
-        pool,
-        authenticator,
-        nats,
-        roots,
-        nats_public_url,
-    )))
+    let command_key = match std::env::var("RMM_COMMAND_KEY_FILE") {
+        Ok(path) => match rmm_api::load_command_key(std::path::Path::new(&path)) {
+            Ok(key) => Some(key),
+            Err(err) => {
+                tracing::error!(%err, "command key unusable; the issue endpoint answers 503");
+                None
+            }
+        },
+        Err(_) => {
+            tracing::warn!("RMM_COMMAND_KEY_FILE is not set; the issue endpoint answers 503");
+            None
+        }
+    };
+
+    Ok(rmm_api::router(
+        AppState::new(pool, authenticator, nats, roots, nats_public_url)
+            .with_command_key(command_key),
+    ))
 }

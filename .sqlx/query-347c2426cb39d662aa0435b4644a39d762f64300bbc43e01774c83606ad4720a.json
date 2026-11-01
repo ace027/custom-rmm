@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into tenant.action_run\n             (cmd_id, client_id, agent_id, device_id, definition_content_id, params, requested_by)\n           values ($1, $2, $3, $4, $5, $6, $7)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Bytea",
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "347c2426cb39d662aa0435b4644a39d762f64300bbc43e01774c83606ad4720a"
+}

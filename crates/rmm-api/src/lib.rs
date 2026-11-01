@@ -1,5 +1,6 @@
 //! HTTP API routes and OpenAPI document.
 
+pub mod actions;
 pub mod admin;
 pub mod auth;
 pub mod enroll;
@@ -13,7 +14,7 @@ use serde::Serialize;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi, ToSchema};
 
-pub use state::{AppState, TrustRoots};
+pub use state::{AppState, TrustRoots, load_command_key};
 
 /// Body returned by the health endpoint.
 #[derive(Debug, Serialize, ToSchema)]
@@ -46,6 +47,8 @@ pub enum ApiError {
     Unprocessable(String),
     /// 429.
     TooManyRequests,
+    /// 503.
+    Unavailable(String),
     /// 500; the cause is logged, not returned.
     Internal,
 }
@@ -78,6 +81,7 @@ impl IntoResponse for ApiError {
             Self::NotFound(m) => (StatusCode::NOT_FOUND, m),
             Self::Conflict(m) => (StatusCode::CONFLICT, m),
             Self::Unprocessable(m) => (StatusCode::UNPROCESSABLE_ENTITY, m),
+            Self::Unavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, m),
             Self::TooManyRequests => (StatusCode::TOO_MANY_REQUESTS, "rate limited".to_string()),
             Self::Internal => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -128,13 +132,20 @@ impl Modify for BearerAuth {
         admin::revoke_agent,
         admin::approve_device,
         admin::reject_device,
-        admin::put_trust
+        admin::put_trust,
+        actions::put_catalog,
+        actions::issue_action,
+        actions::get_action_run
     ),
     components(schemas(
         Health,
         ErrorBody,
         admin::CreateTokenRequest,
-        admin::CreateTokenResponse
+        admin::CreateTokenResponse,
+        actions::CatalogEntry,
+        actions::IssueRequest,
+        actions::IssueResponse,
+        actions::ActionRunResponse
     )),
     modifiers(&BearerAuth)
 )]
@@ -167,6 +178,12 @@ pub fn router(state: AppState) -> Router {
             post(admin::reject_device),
         )
         .route("/api/v1/trust/{kind}", put(admin::put_trust))
+        .route("/api/v1/catalog", put(actions::put_catalog))
+        .route(
+            "/api/v1/agents/{agent_id}/actions",
+            post(actions::issue_action),
+        )
+        .route("/api/v1/action-runs/{cmd_id}", get(actions::get_action_run))
         .with_state(state)
 }
 
@@ -192,6 +209,9 @@ mod tests {
             "/api/v1/devices/{device_id}/approve",
             "/api/v1/devices/{device_id}/reject",
             "/api/v1/trust/{kind}",
+            "/api/v1/catalog",
+            "/api/v1/agents/{agent_id}/actions",
+            "/api/v1/action-runs/{cmd_id}",
         ] {
             assert!(doc.paths.paths.contains_key(p), "missing {p}");
         }

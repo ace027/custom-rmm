@@ -1,9 +1,11 @@
 //! Shared application state.
 
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use ed25519_dalek::SigningKey;
 use sqlx::PgPool;
 
 use crate::auth::Authenticator;
@@ -31,6 +33,18 @@ impl TrustRoots {
         }
         Ok(Self { keys, threshold })
     }
+}
+
+/// Read the server command key: a file holding the 32-byte Ed25519 seed as hex.
+pub fn load_command_key(path: &std::path::Path) -> Result<SigningKey, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("cannot read command key file {}: {e}", path.display()))?;
+    let raw = data_encoding::HEXLOWER_PERMISSIVE
+        .decode(text.trim().as_bytes())
+        .map_err(|e| format!("command key is not hex: {e}"))?;
+    let seed = <[u8; 32]>::try_from(raw.as_slice())
+        .map_err(|_| "command key must be a 32-byte seed".to_string())?;
+    Ok(SigningKey::from_bytes(&seed))
 }
 
 /// Fixed-window per-key request limiter.
@@ -83,6 +97,11 @@ pub struct AppState {
     pub roots: TrustRoots,
     /// NATS URL handed to enrolled agents.
     pub nats_public_url: String,
+    /// Server command signing key (`RMM_COMMAND_KEY_FILE`); `None` makes the
+    /// issue endpoint answer 503.
+    pub command_key: Option<Arc<SigningKey>>,
+    /// Set once the missing command key has been logged.
+    pub(crate) command_key_warned: Arc<AtomicBool>,
     /// Per-IP limiter for `/v1/enroll` (10 per minute).
     pub(crate) enroll_limiter: Arc<IpLimiter>,
 }
@@ -102,7 +121,16 @@ impl AppState {
             nats,
             roots,
             nats_public_url,
+            command_key: None,
+            command_key_warned: Arc::new(AtomicBool::new(false)),
             enroll_limiter: Arc::new(IpLimiter::new(10, Duration::from_secs(60))),
         }
+    }
+
+    /// Set (or clear) the command signing key.
+    #[must_use]
+    pub fn with_command_key(mut self, key: Option<SigningKey>) -> Self {
+        self.command_key = key.map(Arc::new);
+        self
     }
 }
