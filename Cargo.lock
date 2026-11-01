@@ -3098,6 +3098,7 @@ dependencies = [
  "chacha20poly1305 0.11.0",
  "ciborium",
  "ed25519-dalek 3.0.0",
+ "futures-util",
  "nkeys",
  "rand 0.10.3",
  "reqwest",
@@ -3121,6 +3122,7 @@ name = "rmm-api"
 version = "0.1.0"
 dependencies = [
  "async-nats",
+ "aws-lc-rs",
  "axum",
  "ciborium",
  "data-encoding",

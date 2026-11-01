@@ -8,12 +8,19 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
+use aws_lc_rs::encoding::AsDer;
+use aws_lc_rs::rand::SystemRandom;
+use aws_lc_rs::rsa::KeySize;
+use aws_lc_rs::signature::{
+    ECDSA_P384_SHA384_ASN1_SIGNING, EcdsaKeyPair, KeyPair as _, RSA_PKCS1_SHA256, RsaKeyPair,
+};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use ciborium::Value as Cbor;
 use ed25519_dalek::{Signer as _, SigningKey as EdKey};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+use p256::ecdsa::signature::Keypair;
 use p256::ecdsa::{DerSignature, SigningKey as P256Key};
 use rmm_api::attestation::{
     AttestationConfig, AttestationError, OID_FIDO_GEN_CE_AAGUID, verify_registration_at,
@@ -39,7 +46,10 @@ use tower::ServiceExt;
 use x509_cert::Certificate;
 use x509_cert::builder::profile::BuilderProfile;
 use x509_cert::builder::{Builder, CertificateBuilder};
-use x509_cert::der::asn1::OctetString;
+use x509_cert::der::asn1::{Any, BitString, OctetString};
+use x509_cert::der::oid::ObjectIdentifier;
+use x509_cert::der::{Decode, Document};
+use x509_cert::spki::{AlgorithmIdentifierOwned, DynSignatureAlgorithmIdentifier, EncodePublicKey};
 use x509_cert::der::oid::AssociatedOid;
 use x509_cert::der::pem::LineEnding;
 use x509_cert::der::{Encode, EncodePem};
@@ -247,6 +257,12 @@ struct Made {
 
 /// Produce a registration response for `challenge`.
 fn attest(o: &Opts, challenge: &[u8]) -> Made {
+    let (x5c, leaf_key) = p256_chain(o);
+    attest_with(o, challenge, x5c, &leaf_key)
+}
+
+/// A registration response for `challenge` with the given x5c and leaf key.
+fn attest_with(o: &Opts, challenge: &[u8], x5c: Vec<Vec<u8>>, leaf_key: &P256Key) -> Made {
     let cred_key = p256(o.cred_seed);
     let cose = cose_es256(&cred_key);
     let mut ad = Sha256::digest(o.rp_id.as_bytes()).to_vec();
@@ -261,7 +277,11 @@ fn attest(o: &Opts, challenge: &[u8]) -> Made {
         "type": o.ty, "challenge": b64(challenge), "origin": o.origin, "crossOrigin": false
     }))
     .unwrap();
+    assemble(o, ad, client_data, cose, x5c, leaf_key)
+}
 
+/// An all-P-256 x5c (leaf first) from `o`'s root, and the leaf key.
+fn p256_chain(o: &Opts) -> (Vec<Vec<u8>>, P256Key) {
     let (root_key, _) = root_ca(o.root_seed);
     let int_key = p256(o.root_seed.wrapping_add(1));
     let leaf_key = p256(o.root_seed.wrapping_add(2));
@@ -305,6 +325,18 @@ fn attest(o: &Opts, challenge: &[u8]) -> Made {
         x5c.push(leaf.to_der().unwrap());
     }
 
+    (x5c, leaf_key)
+}
+
+/// Sign `ad || SHA-256(client_data)` with `leaf_key` and build the object.
+fn assemble(
+    o: &Opts,
+    ad: Vec<u8>,
+    client_data: Vec<u8>,
+    cose: Vec<u8>,
+    x5c: Vec<Vec<u8>>,
+    leaf_key: &P256Key,
+) -> Made {
     let mut msg = ad.clone();
     msg.extend_from_slice(&Sha256::digest(&client_data));
     let sig: DerSignature = leaf_key.sign(&msg);
@@ -570,6 +602,224 @@ fn config_parsing() {
     )
     .unwrap();
     assert_eq!(cfg.aaguids, vec![AAGUID, OTHER_AAGUID]);
+}
+
+// ------------------------------------- P-384 and RSA roots (aws-lc-rs)
+//
+// Real vendor attestation CAs are not all P-256: Yubico's FIDO root is
+// RSA-2048 and newer roots are P-384. These keys are generated per test run.
+
+/// A test CA whose key lives in aws-lc-rs, usable as an x509-cert signer.
+struct AwsCa {
+    key: AwsKey,
+    spki_der: Vec<u8>,
+    /// Signature algorithm OID to claim (default: the one actually used).
+    claim: Option<ObjectIdentifier>,
+}
+
+enum AwsKey {
+    P384(EcdsaKeyPair),
+    Rsa(RsaKeyPair),
+}
+
+#[derive(Clone)]
+struct SpkiDer(Vec<u8>);
+
+impl EncodePublicKey for SpkiDer {
+    fn to_public_key_der(&self) -> x509_cert::spki::Result<Document> {
+        Ok(Document::try_from(self.0.as_slice())?)
+    }
+}
+
+impl Keypair for AwsCa {
+    type VerifyingKey = SpkiDer;
+    fn verifying_key(&self) -> SpkiDer {
+        SpkiDer(self.spki_der.clone())
+    }
+}
+
+const OID_ECDSA_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
+const OID_ECDSA_SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.3");
+const OID_SHA256_RSA: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.11");
+
+impl DynSignatureAlgorithmIdentifier for AwsCa {
+    fn signature_algorithm_identifier(&self) -> x509_cert::spki::Result<AlgorithmIdentifierOwned> {
+        Ok(match self.key {
+            AwsKey::P384(_) => AlgorithmIdentifierOwned {
+                oid: self.claim.unwrap_or(OID_ECDSA_SHA384),
+                parameters: None,
+            },
+            AwsKey::Rsa(_) => AlgorithmIdentifierOwned {
+                oid: self.claim.unwrap_or(OID_SHA256_RSA),
+                parameters: Some(Any::null()),
+            },
+        })
+    }
+}
+
+impl AwsCa {
+    fn p384() -> Self {
+        let k = EcdsaKeyPair::generate(&ECDSA_P384_SHA384_ASN1_SIGNING).unwrap();
+        let spki_der = k.public_key().as_der().unwrap().as_ref().to_vec();
+        Self {
+            key: AwsKey::P384(k),
+            spki_der,
+            claim: None,
+        }
+    }
+
+    fn rsa2048() -> Self {
+        let k = RsaKeyPair::generate(KeySize::Rsa2048).unwrap();
+        let spki_der = k.public_key().as_der().unwrap().as_ref().to_vec();
+        Self {
+            key: AwsKey::Rsa(k),
+            spki_der,
+            claim: None,
+        }
+    }
+
+    fn spki(&self) -> SubjectPublicKeyInfoOwned {
+        SubjectPublicKeyInfoOwned::from_der(&self.spki_der).unwrap()
+    }
+
+    fn sign(&self, msg: &[u8]) -> Vec<u8> {
+        let rng = SystemRandom::new();
+        match &self.key {
+            AwsKey::P384(k) => k.sign(&rng, msg).unwrap().as_ref().to_vec(),
+            AwsKey::Rsa(k) => {
+                let mut out = vec![0u8; k.public_modulus_len()];
+                k.sign(&RSA_PKCS1_SHA256, &rng, msg, &mut out).unwrap();
+                out
+            }
+        }
+    }
+
+    /// Issue a certificate for `subject_spki`, signed by this CA.
+    fn issue(&self, profile: Profile, subject_spki: SubjectPublicKeyInfoOwned) -> Certificate {
+        let mut b = CertificateBuilder::new(
+            profile,
+            SerialNumber::from(43u32),
+            validity(-DAY, 3650 * DAY),
+            subject_spki,
+        )
+        .unwrap();
+        let tbs = b.finalize(self).unwrap();
+        let sig = BitString::from_bytes(&self.sign(&tbs)).unwrap();
+        b.assemble(sig, self).unwrap()
+    }
+
+    fn root(&self) -> Certificate {
+        self.issue(profile(ROOT_DN, ROOT_DN, true, None), self.spki())
+    }
+}
+
+fn profile(subject: &str, issuer: &str, ca: bool, aaguid: Option<[u8; 16]>) -> Profile {
+    Profile {
+        subject: Name::from_str(subject).unwrap(),
+        issuer: Name::from_str(issuer).unwrap(),
+        ca,
+        aaguid_ext: aaguid.map(|a| a.to_vec()),
+    }
+}
+
+/// x5c issued by `ca` (directly, or through a P-256 intermediate), and the
+/// P-256 leaf key.
+fn aws_chain(ca: &AwsCa, intermediate: bool) -> (Vec<Vec<u8>>, P256Key) {
+    let leaf_key = p256(31);
+    if intermediate {
+        let int_key = p256(32);
+        let int = ca.issue(profile(INT_DN, ROOT_DN, true, None), spki(&int_key));
+        let leaf = make_cert(CertSpec {
+            subject: LEAF_DN,
+            issuer: INT_DN,
+            key: &leaf_key,
+            issuer_key: &int_key,
+            ca: false,
+            aaguid_ext: Some(AAGUID.to_vec()),
+            validity: validity(-DAY, 365 * DAY),
+        });
+        (vec![leaf.to_der().unwrap(), int.to_der().unwrap()], leaf_key)
+    } else {
+        let leaf = ca.issue(profile(LEAF_DN, ROOT_DN, false, Some(AAGUID)), spki(&leaf_key));
+        (vec![leaf.to_der().unwrap()], leaf_key)
+    }
+}
+
+/// Verify a default response carrying `x5c` against `root` only.
+fn verify_against(
+    root: &Certificate,
+    x5c: Vec<Vec<u8>>,
+    leaf_key: &P256Key,
+) -> Result<rmm_api::attestation::RegisteredCredential, AttestationError> {
+    let challenge = [9u8; 32];
+    let m = attest_with(&Opts::default(), &challenge, x5c, leaf_key);
+    let pem = root.to_pem(LineEnding::LF).unwrap();
+    let cfg =
+        AttestationConfig::from_parts(pem.as_bytes(), &data_encoding::HEXLOWER.encode(&AAGUID))
+            .unwrap();
+    verify_registration_at(
+        &m.att_obj,
+        &m.client_data,
+        &challenge,
+        RP_ID,
+        &[ORIGIN.to_owned()],
+        &cfg.roots,
+        &cfg.aaguids,
+        now(),
+    )
+}
+
+#[test]
+fn p384_and_rsa2048_roots_verify_with_x5c_of_length_one_and_two() {
+    for (name, ca) in [("p384", AwsCa::p384()), ("rsa2048", AwsCa::rsa2048())] {
+        let root = ca.root();
+        for intermediate in [false, true] {
+            let (x5c, leaf_key) = aws_chain(&ca, intermediate);
+            let got = verify_against(&root, x5c, &leaf_key)
+                .unwrap_or_else(|e| panic!("{name} intermediate={intermediate}: {e:?}"));
+            assert_eq!(got.aaguid, AAGUID);
+        }
+    }
+}
+
+#[test]
+fn p384_and_rsa2048_chain_to_another_root_is_rejected() {
+    for (name, ca, other) in [
+        ("p384", AwsCa::p384(), AwsCa::p384()),
+        ("rsa2048", AwsCa::rsa2048(), AwsCa::rsa2048()),
+    ] {
+        // Same DN, different key: the signature check must fail.
+        let other_root = other.root();
+        for intermediate in [false, true] {
+            let (x5c, leaf_key) = aws_chain(&ca, intermediate);
+            assert!(
+                matches!(
+                    verify_against(&other_root, x5c, &leaf_key),
+                    Err(AttestationError::Chain(_))
+                ),
+                "{name} intermediate={intermediate}"
+            );
+        }
+    }
+}
+
+#[test]
+fn signature_algorithm_must_match_the_issuer_key() {
+    // A P-384 CA claiming ecdsa-with-SHA256, and an RSA CA claiming
+    // ecdsa-with-SHA384: both are rejected rather than reinterpreted.
+    let mut p384 = AwsCa::p384();
+    let p384_root = p384.root();
+    p384.claim = Some(OID_ECDSA_SHA256);
+    let mut rsa = AwsCa::rsa2048();
+    let rsa_root = rsa.root();
+    rsa.claim = Some(OID_ECDSA_SHA384);
+    for (root, ca) in [(&p384_root, &p384), (&rsa_root, &rsa)] {
+        let (x5c, leaf_key) = aws_chain(ca, false);
+        assert!(matches!(
+            verify_against(root, x5c, &leaf_key),
+            Err(AttestationError::Chain(_))
+        ));
+    }
 }
 
 // ------------------------------------------------------------- HTTP flow

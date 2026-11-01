@@ -30,6 +30,9 @@ ed25519-dalek.workspace = true
 nkeys.workspace = true
 p256.workspace = true
 ciborium.workspace = true
+# Already in the tree via jsonwebtoken's aws_lc_rs feature; used for X.509
+# chain signatures (ECDSA P-256/P-384, RSA PKCS#1 v1.5).
+aws-lc-rs = "1.19"
 x509-cert = { version = "0.3", default-features = false, features = ["pem", "std"] }
 
 [dev-dependencies]

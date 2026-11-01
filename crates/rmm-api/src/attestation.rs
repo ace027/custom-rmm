@@ -4,12 +4,15 @@
 //!
 //! Every other attestation format, including `none` and self attestation
 //! (packed without x5c), is rejected, so only authenticators whose vendor
-//! certified the key can register. Certificate signatures are checked with
-//! ECDSA P-256 / SHA-256 only; a chain using any other algorithm is rejected.
+//! certified the key can register. Chain signatures are checked with
+//! aws-lc-rs and may be ECDSA P-256/SHA-256, ECDSA P-384/SHA-384 or RSA
+//! PKCS#1 v1.5 SHA-256 (2048-8192 bit); any other algorithm is rejected.
+//! The attestation signature itself must be ES256 from a P-256 leaf.
 
 use std::io::Cursor;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use aws_lc_rs::signature;
 use ciborium::Value;
 use p256::ecdsa::signature::Verifier;
 use p256::ecdsa::{Signature as P256Signature, VerifyingKey as P256VerifyingKey};
@@ -29,7 +32,12 @@ pub const OID_FIDO_GEN_CE_AAGUID: ObjectIdentifier =
     ObjectIdentifier::new_unwrap("1.3.6.1.4.1.45724.1.1.4");
 const OID_EC_PUBLIC_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.2.1");
 const OID_SECP256R1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7");
+const OID_SECP384R1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.34");
 const OID_ECDSA_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
+const OID_ECDSA_SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.3");
+const OID_RSA_ENCRYPTION: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1");
+const OID_SHA256_WITH_RSA: ObjectIdentifier =
+    ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.11");
 const OID_BASIC_CONSTRAINTS: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.19");
 const OID_KEY_USAGE: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.15");
 
@@ -368,28 +376,99 @@ fn p256_key(spki: &SubjectPublicKeyInfoOwned) -> Result<P256VerifyingKey, Attest
     P256VerifyingKey::from_sec1_bytes(bits).map_err(|_| chain_err("invalid P-256 point"))
 }
 
-/// Verify that `issuer` signed `cert` (ECDSA P-256 with SHA-256).
+/// A certificate-signing key this verifier accepts for chain links.
+enum IssuerKey<'a> {
+    /// Uncompressed SEC1 point on P-256.
+    P256(&'a [u8]),
+    /// Uncompressed SEC1 point on P-384.
+    P384(&'a [u8]),
+    /// PKCS#1 `RSAPublicKey` DER.
+    Rsa(&'a [u8]),
+}
+
+/// Classify an issuer SPKI; any key other than P-256, P-384 or RSA is
+/// rejected. RSA modulus size (2048-8192 bits) is enforced at verification.
+fn issuer_key(spki: &SubjectPublicKeyInfoOwned) -> Result<IssuerKey<'_>, AttestationError> {
+    let bits = spki
+        .subject_public_key
+        .as_bytes()
+        .ok_or_else(|| chain_err("public key bit string"))?;
+    if spki.algorithm.oid == OID_RSA_ENCRYPTION {
+        // RFC 4055: parameters MUST be NULL (tolerate absent).
+        match &spki.algorithm.parameters {
+            None => {}
+            Some(p) if p.is_null() => {}
+            Some(_) => return Err(chain_err("RSA key with parameters")),
+        }
+        return Ok(IssuerKey::Rsa(bits));
+    }
+    if spki.algorithm.oid != OID_EC_PUBLIC_KEY {
+        return Err(chain_err("certificate key is not an EC or RSA key"));
+    }
+    let curve: ObjectIdentifier = spki
+        .algorithm
+        .parameters
+        .as_ref()
+        .ok_or_else(|| chain_err("EC key without curve"))?
+        .decode_as()
+        .map_err(|_| chain_err("EC key curve is not a named curve"))?;
+    let (len, key) = if curve == OID_SECP256R1 {
+        (65, IssuerKey::P256(bits))
+    } else if curve == OID_SECP384R1 {
+        (97, IssuerKey::P384(bits))
+    } else {
+        return Err(chain_err("EC key is not on P-256 or P-384"));
+    };
+    if bits.len() != len || bits.first() != Some(&0x04) {
+        return Err(chain_err("EC key is not an uncompressed point"));
+    }
+    Ok(key)
+}
+
+/// Verify that `issuer` signed `cert`.
+///
+/// Accepted (signature algorithm, issuer key) pairs, matching what FIDO
+/// vendors use for attestation CAs: ecdsa-with-SHA256 with P-256,
+/// ecdsa-with-SHA384 with P-384, sha256WithRSAEncryption with RSA
+/// 2048-8192 bits. Every other combination is rejected.
 fn verify_signed_by(cert: &Certificate, issuer: &Certificate) -> Result<(), AttestationError> {
     let tbs = cert.tbs_certificate();
     if tbs.issuer() != issuer.tbs_certificate().subject() {
         return Err(chain_err("issuer name does not match"));
     }
-    if cert.signature_algorithm().oid != OID_ECDSA_SHA256
-        || cert.signature_algorithm().parameters.is_some()
-        || tbs.signature() != cert.signature_algorithm()
-    {
-        return Err(chain_err(
-            "certificate is not signed with ecdsa-with-SHA256",
-        ));
+    let sig_alg = cert.signature_algorithm();
+    if tbs.signature() != sig_alg {
+        return Err(chain_err("signature algorithm mismatch inside certificate"));
     }
-    let key = p256_key(issuer.tbs_certificate().subject_public_key_info())?;
+    let key = issuer_key(issuer.tbs_certificate().subject_public_key_info())?;
+    let (alg, key_bytes): (&'static dyn signature::VerificationAlgorithm, &[u8]) =
+        match (sig_alg.oid, key) {
+            // RFC 5758: ECDSA signature algorithm parameters MUST be absent.
+            (o, IssuerKey::P256(k)) if o == OID_ECDSA_SHA256 && sig_alg.parameters.is_none() => {
+                (&signature::ECDSA_P256_SHA256_ASN1, k)
+            }
+            (o, IssuerKey::P384(k)) if o == OID_ECDSA_SHA384 && sig_alg.parameters.is_none() => {
+                (&signature::ECDSA_P384_SHA384_ASN1, k)
+            }
+            (o, IssuerKey::Rsa(k))
+                if o == OID_SHA256_WITH_RSA
+                    && sig_alg.parameters.as_ref().is_none_or(|p| p.is_null()) =>
+            {
+                (&signature::RSA_PKCS1_2048_8192_SHA256, k)
+            }
+            (o, _) => {
+                return Err(chain_err(format!(
+                    "unsupported certificate signature algorithm {o} for the issuer key"
+                )));
+            }
+        };
     let msg = tbs.to_der().map_err(|e| chain_err(format!("tbs: {e}")))?;
     let raw = cert
         .signature()
         .as_bytes()
         .ok_or_else(|| chain_err("signature bit string"))?;
-    let sig = P256Signature::from_der(raw).map_err(|_| chain_err("bad certificate signature"))?;
-    key.verify(&msg, &sig)
+    signature::UnparsedPublicKey::new(alg, key_bytes)
+        .verify(&msg, raw)
         .map_err(|_| chain_err("certificate signature does not verify"))
 }
 
@@ -638,7 +717,7 @@ impl AttestationConfig {
             return Err("attestation root bundle holds no certificates".into());
         }
         for r in &roots {
-            p256_key(r.tbs_certificate().subject_public_key_info())
+            issuer_key(r.tbs_certificate().subject_public_key_info())
                 .map_err(|e| format!("attestation root: {e}"))?;
         }
         let aaguids = parse_aaguids(aaguids)?;

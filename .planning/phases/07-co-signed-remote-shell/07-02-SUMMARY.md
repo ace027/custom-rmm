@@ -1,19 +1,18 @@
 # Plan 07-02 Summary: Hardware-only WebAuthn registration, shell tables and techlist allowlist
 
 ## Result
-**Status**: Failed
+**Status**: Complete with Warnings
 **Wave**: 2
 **Agent**: engineering-security-engineer
 **Completed**: 2026-11-01
-**Failure Class**: BLOCKER — $ cargo run -q -p xtask -- openapi && git diff --exit-code docs/openapi.json (exit 1)
 
 ## Agent Selection Rationale
 
 | Candidate | Semantic | Heuristic | Memory | Total | Source |
 |-----------|----------|-----------|--------|-------|--------|
-| engineering-security-engineer | — | 8 | 2.67 | 10.67 | mandatory |
-| engineering-senior-developer | — | 24 | 3.83 | 27.83 | heuristic |
-| engineering-infrastructure-devops | — | 17 | 3.67 | 20.67 | heuristic |
+| engineering-security-engineer | — | 8 | 2.64 | 10.64 | mandatory |
+| engineering-senior-developer | — | 20 | 3.83 | 23.83 | heuristic |
+| engineering-infrastructure-devops | — | 19 | 3.67 | 22.67 | heuristic |
 
 - **Task type detected**: implementation
 - **Confidence**: LOW
@@ -26,10 +25,13 @@
 - [x] Task 3: AAGUID allowlist in rmm-sign techlist (done)
 
 ## Files Modified
-(none)
+- `Cargo.lock`
+- `crates/rmm-api/Cargo.toml`
+- `crates/rmm-api/src/attestation.rs`
+- `crates/rmm-api/tests/technicians.rs`
 
 ## Verification Results
-6/7 verification commands passed (run by Triad after the agent finished).
+7/7 verification commands passed (run by Triad after the agent finished).
 
 ## Verification Commands
 | Command | Exit Code | Result |
@@ -38,94 +40,31 @@
 | `DATABASE_URL=postgres://rmm:$(grep '^RMM_PG_PASSWORD=' deploy/.env.example \| cut -d= -f2)@127.0.0.1:5432/rmm cargo test -p rmm-api --test technicians` | 0 | PASS |
 | `cargo test -p rmm-sign` | 0 | PASS |
 | `cargo clippy -p rmm-db -p rmm-api -p rmm-sign --all-targets -- -D warnings` | 0 | PASS |
-| `cargo run -q -p xtask -- openapi && git diff --exit-code docs/openapi.json` | 1 | FAIL |
+| `t=$(mktemp) && cp docs/openapi.json "$t" && cargo run -q -p xtask -- openapi && cmp docs/openapi.json "$t"` | 0 | PASS |
 | `bash scripts/check-layering.sh` | 0 | PASS |
 | `DATABASE_URL=postgres://rmm:$(grep '^RMM_PG_PASSWORD=' deploy/.env.example \| cut -d= -f2)@127.0.0.1:5432/rmm cargo sqlx prepare --workspace --check` | 0 | PASS |
 
 ## Key Decisions
-- The new queries are checked at runtime (sqlx::query), so crates/rmm-db/.sqlx/ holds no new entries.
+- Accepted chain-link pairs are exactly ecdsa-with-SHA256 with P-256, ecdsa-with-SHA384 with P-384, and sha256WithRSAEncryption with RSA; mixed pairs such as P-384 with SHA-256 are rejected, as the plan asked (this fails safe)
 
 ## Issues Encountered
-- Certificate chains are checked with ECDSA P-256/SHA-256 only, as the plan specified. Real Yubico roots may use other algorithms, so real YubiKeys may fail registration (escalation below).
-- BLOCKER: $ cargo run -q -p xtask -- openapi && git diff --exit-code docs/openapi.json (exit 1)
+- No database was running at first. dockerd was not started; I started it and brought up the compose timescale container (rmm-timescale-1, existing volume rmm_pgdata). It is still running.
 
 ## Escalations
 | # | Severity | Type | Decision | Status | Resolution |
 |---|----------|------|----------|--------|------------|
-| 1 | warning | architecture | Should attestation chain verification support RSA and P-384 issuers? That needs a new dependency. | approved | User approved: support ECDSA P-384/SHA-384 and RSA PKCS#1 v1.5 SHA-256 chain signatures via aws-lc-rs (already in the tree through jsonwebtoken); plan 07-02 updated. |
-| 2 | info | security | Production deployments must not set the dev attestation root or the dev AAGUID. | pending | INVALID: type "security" is not one of architecture, dependency, scope, schema, api, deletion, infrastructure, quality |
-| 3 | blocker | quality | Resolve: $ cargo run -q -p xtask -- openapi && git diff --exit-code docs/openapi.json (exit 1) | approved | User approved the check fix: the verification now regenerates docs/openapi.json and compares it with the working tree (cmp against a copy) instead of git diff against HEAD. |
+| 1 | info | deployment | Production deployments must not set RMM_WEBAUTHN_ATTESTATION_ROOTS or RMM_WEBAUTHN_AAGUIDS to the dev values (the dev root PEM and dev AAGUID). Add a startup refusal or a release checklist item for this. | pending | INVALID: type "deployment" is not one of architecture, dependency, scope, schema, api, deletion, infrastructure, quality |
 
-- #1 context: crates/rmm-api/src/attestation.rs verify_signed_by accepts only ecdsa-with-SHA256 on P-256 issuers. Yubico's FIDO attestation roots may be RSA, so production registration with real YubiKeys can be rejected. It fails closed, so this is not a security hole. It is a functionality gap to settle before production.
-- #2 context: If they do, a software (fake) authenticator could register. The dev values are only in deploy/.env.example and compose.yaml (SEC-003 LOW).
-- #3 context: Verification failed (cargo run -q -p xtask -- openapi && git diff --exit-code docs/openapi.json); a BLOCKER is not auto-fixed.
+- #1 context: If the dev root is trusted, a software (fake) authenticator can register and land in the technician list, which removes the hardware-only guarantee (LOW, carried over as SEC-003). The dev values appear only in deploy/.env.example and deploy/compose.yaml. A startup guard would need a change outside 07-02's files, so I did not add one.
 
 ## Handoff Context
-- **Key outputs**: (none)
-- **Decisions made**: The new queries are checked at runtime (sqlx::query), so crates/rmm-db/.sqlx/ holds no new entries.
+- **Key outputs**: Cargo.lock; crates/rmm-api/Cargo.toml; crates/rmm-api/src/attestation.rs; crates/rmm-api/tests/technicians.rs
+- **Decisions made**: Accepted chain-link pairs are exactly ecdsa-with-SHA256 with P-256, ecdsa-with-SHA384 with P-384, and sha256WithRSAEncryption with RSA; mixed pairs such as P-384 with SHA-256 are rejected, as the plan asked (this fails safe)
 - **Open questions**: (none)
-- **Conventions established**: 07-04 must create the dev root PEM at the path deploy/compose.yaml points to (deploy/dev/webauthn/attestation-root.pem). Until it exists, registration answers 503.
+- **Conventions established**: Attestation roots in RMM_WEBAUTHN_ATTESTATION_ROOTS may now be P-256, P-384 or RSA 2048-8192; 07-04's dev fake authenticator may keep using a P-256 root at deploy/dev/webauthn/attestation-root.pem
 
 ## Requirements Covered
 - REQ-18
 
-## Error Details
-Verification failed: cargo run -q -p xtask -- openapi && git diff --exit-code docs/openapi.json
-
-### Failed verification output
-`cargo run -q -p xtask -- openapi && git diff --exit-code docs/openapi.json`
-```
-ring",
-+            "description": "User name (the technician id)."
-+          }
-+        }
-+      },
-+      "RegisterFinishRequest": {
-+        "type": "object",
-+        "description": "The authenticator's response to `navigator.credentials.create`.",
-+        "required": [
-+          "challenge_id",
-+          "attestation_object_b64url",
-+          "client_data_json_b64url"
-+        ],
-+        "properties": {
-+          "attestation_object_b64url": {
-+            "type": "string",
-+            "description": "`response.attestationObject`, unpadded base64url."
-+          },
-+          "challenge_id": {
-+            "type": "string",
-+            "description": "`challenge_id` from `begin`."
-+          },
-+          "client_data_json_b64url": {
-+            "type": "string",
-+            "description": "`response.clientDataJSON`, unpadded base64url."
-+          }
-+        },
-+        "additionalProperties": false
-+      },
-+      "RegisterFinishResponse": {
-+        "type": "object",
-+        "description": "A registered credential.",
-+        "required": [
-+          "cred_id_b64url",
-+          "aaguid_hex"
-+        ],
-+        "properties": {
-+          "aaguid_hex": {
-+            "type": "string",
-+            "description": "Authenticator AAGUID, lowercase hex."
-+          },
-+          "cred_id_b64url": {
-+            "type": "string",
-+            "description": "Credential id, unpadded base64url."
-+          }
-+        }
-       }
-     },
-     "securitySchemes": {
-
-```
-
 ## Token Usage
-13 requests, 463610 input tokens (421111 cached), 6613 output tokens, $0.4290
+49 requests, 3493766 input tokens (3398719 cached), 31607 output tokens, $1.7870
