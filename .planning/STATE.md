@@ -2,8 +2,8 @@
 
 ## Current Position
 - **Phase**: 7 of 9 (executing)
-- **Status**: Phase 7 executing — Plan 07-03 complete
-- **Last Activity**: Plan 07-03 execution (2026-11-01)
+- **Status**: Phase 7 executing — Plan 07-04 failed
+- **Last Activity**: Plan 07-04 execution (2026-11-01)
 
 ## Progress
 ```
@@ -91,3 +91,4 @@ Fix the failed plans and run `/triad:build` again (completed plans are kept), or
 - Plan 07-03 (Wave 2): Agent shell: co-sign verification, ConPTY session pump and lockout — PARTIAL: Task 3 needs a `ShellLink` for `async_nats::Client`. Reading a core-NATS `Subscriber` requires the `futures::Stream` trait (async-nats 0.51 has no inherent `next` and no re-export). None of rmm-agent-
 - Plan 07-02 (Wave 2): Hardware-only WebAuthn registration, shell tables and techlist allowlist — Complete with Warnings
 - Plan 07-03 (Wave 2): Agent shell: co-sign verification, ConPTY session pump and lockout — Complete
+- Plan 07-04 (Wave 3): Grant API, browser relay, recordings and end-to-end shell — PARTIAL: Grant/open endpoints, relay, recordings with retention, NATS/compose config, fake authenticator and e2e script are written. The Rust-side verification passes, but scripts/e2e-shell.sh has not complete
