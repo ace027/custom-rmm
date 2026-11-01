@@ -204,8 +204,11 @@ R1=$(cpu_rows)
 [[ $((R1 - R0)) -ge 40 ]] || fail "only $((R1 - R0)) cpu.usage_pct rows landed from the agent in 20 s, want at least 40"
 pass "(6a) agent at 50 ms metric interval: $((R1 - R0)) batches landed, 0 pending"
 
-# Hand-encoded CBOR MetricBatch (rmm_proto::telemetry): v, msg_id, sent_at and
-# ten "e2e.burst" samples. Identity comes from the subject only.
+# Hand-encoded CBOR MetricBatches (rmm_proto::telemetry): v, msg_id, sent_at and
+# ten "e2e.burst" samples each. Identity comes from the subject only. Every
+# batch has its own msg_id, because ingest deduplicates by msg_id; batches are
+# newline-separated for `nats pub --send-on newline`, so no encoded byte may be
+# 0x0a.
 python3 -I - >"$WORK/burst.cbor" <<'PY'
 import struct, sys, time
 
@@ -221,13 +224,20 @@ def text(s):
     return head(3, len(b)) + b
 
 now = int(time.time() * 1000)
+while b"\n" in struct.pack(">Q", now):
+    now += 1
 sample = (head(5, 3) + text("t") + head(0, now) + text("metric") + text("e2e.burst")
           + text("value") + b"\xfb" + struct.pack(">d", 1.0))
-body = (head(5, 4) + text("v") + head(0, 1)
-        + text("msg_id") + head(2, 16) + bytes(range(1, 17))
-        + text("sent_at") + head(0, now)
-        + text("samples") + head(4, 10) + sample * 10)
-sys.stdout.buffer.write(body)
+out = sys.stdout.buffer
+for i in range(1000):
+    # 14 fixed bytes plus two counter bytes in 0x10..0xd7, never 0x0a.
+    msg_id = bytes(range(0x20, 0x2e)) + bytes([0x10 + i // 200, 0x10 + i % 200])
+    body = (head(5, 4) + text("v") + head(0, 1)
+            + text("msg_id") + head(2, 16) + msg_id
+            + text("sent_at") + head(0, now)
+            + text("samples") + head(4, 10) + sample * 10)
+    assert b"\n" not in body
+    out.write(body + b"\n")
 PY
 SEED=$WORK/agent.nk
 "${SUDO[@]}" python3 scripts/nkey-seed.py "$DIR/agent.key" >"$SEED"
@@ -235,7 +245,7 @@ chmod 644 "$SEED"
 B0=$(q "select count(*) from ts_private.metrics where device_id = '$DEV' and metric = 'e2e.burst'")
 docker run --rm -i --network host -v "$CA:/ca.pem:ro" -v "$SEED:/agent.nk:ro" \
   natsio/nats-box:latest nats --tlsca /ca.pem --nkey /agent.nk --timeout 10s \
-  --server "wss://localhost:$PORT/nats" pub "telemetry.$C1.$AG.metric" --count 1000 \
+  --server "wss://localhost:$PORT/nats" pub "telemetry.$C1.$AG.metric" --send-on newline \
   <"$WORK/burst.cbor" >/dev/null 2>"$WORK/burst.err" || fail "burst publish: $(cat "$WORK/burst.err")"
 deadline=$((SECONDS + 60))
 while :; do
