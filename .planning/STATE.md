@@ -1,9 +1,9 @@
 # Project State
 
 ## Current Position
-- **Phase**: 4 of 9 (executed, pending review)
-- **Status**: Phase 4 under review — cycle 1/3, 0 blocker(s) remaining
-- **Last Activity**: Phase 4 review cycle 1 (2026-11-01)
+- **Phase**: 4 of 9 (complete)
+- **Status**: Phase 4 complete — review passed (2 cycle(s))
+- **Last Activity**: Phase 4 review (2026-11-01)
 
 ## Progress
 ```
@@ -28,7 +28,7 @@
 - Phase 4 throughput check split (user-approved): real agent at 50 ms interval must land >= 40 batches in 20 s (sysinfo CPU sampling blocks 200 ms per sample); ingest capacity proven by a 10000-sample burst within 60 s
 
 ## Next Action
-Run `/triad:review` to verify Phase 4: Heartbeat, inventory and metrics
+Run `/triad:plan 5` to plan Phase 5: Encrypted local store and offline sync
 
 ## Phase 1 Results
 (build started 2026-10-31)
