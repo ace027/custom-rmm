@@ -67,7 +67,7 @@
 ## Escalations
 | # | Severity | Type | Decision | Status | Resolution |
 |---|----------|------|----------|--------|------------|
-| 1 | blocker | quality | Resolve: ENVIRONMENT issue persisted after one automatic retry: $ RMM_HTTPS_PORT=8443 scripts/e2e-telemetry.sh (exit 1) | pending |  |
+| 1 | blocker | quality | Resolve: ENVIRONMENT issue persisted after one automatic retry: $ RMM_HTTPS_PORT=8443 scripts/e2e-telemetry.sh (exit 1) | approved | User accepted the split throughput check: (6a) real agent at a 50 ms metric interval for 20 s lands >= 40 batches with 0 pending (sysinfo's 200 ms CPU sampling caps one agent at ~5 batches/s); (6b) 10000 hand-encoded samples on the agent's subject land within 60 s with 0 pending (the ingest capacity test). The earlier failure was disk exhaustion; re-run the build to verify. |
 
 - #1 context: Verification failed (RMM_HTTPS_PORT=8443 scripts/e2e-telemetry.sh; RMM_HTTPS_PORT=8443 scripts/e2e-enroll.sh); a BLOCKER is not auto-fixed.
 

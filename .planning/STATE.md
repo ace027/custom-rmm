@@ -25,6 +25,7 @@
 - Root key generated air-gapped, age-encrypted on two USB sticks (safe + offsite)
 - Foundation is broken into 9 Triad phases (design milestones M0-M8); product phases 2-6 come later
 - Open a pull request for the working branch through the GitHub MCP tools so CI runs on every push (replaces the earlier "no PR" default; gh CLI is not available)
+- Phase 4 throughput check split (user-approved): real agent at 50 ms interval must land >= 40 batches in 20 s (sysinfo CPU sampling blocks 200 ms per sample); ingest capacity proven by a 10000-sample burst within 60 s
 
 ## Next Action
 Fix the failed plans and run `/triad:build` again (completed plans are kept), or run `/triad:review`
