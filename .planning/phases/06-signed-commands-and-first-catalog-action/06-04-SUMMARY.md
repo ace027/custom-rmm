@@ -62,7 +62,7 @@
 |---|----------|------|----------|--------|------------|
 | 1 | blocker | environment | Free space on the Docker host, or approve a destructive `docker system prune -a` or `docker volume prune`. | pending | INVALID: type "environment" is not one of architecture, dependency, scope, schema, api, deletion, infrastructure, quality |
 | 2 | blocker | scope/architecture | Extend `rmm-sign` with a `rmm.definition/1` doc type and a seed export, or approve another way to sign the dev definition. | pending | INVALID: type "scope/architecture" is not one of architecture, dependency, scope, schema, api, deletion, infrastructure, quality |
-| 3 | blocker | quality | Resolve: ENVIRONMENT issue persisted after one automatic retry: #11 ERROR: write /var/lib/docker/containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/1546/fs/usr/lib/x86_64-linux-gnu/libicudata.a: no space left on device | pending |  |
+| 3 | blocker | quality | Resolve: ENVIRONMENT issue persisted after one automatic retry: #11 ERROR: write /var/lib/docker/containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/1546/fs/usr/lib/x86_64-linux-gnu/libicudata.a: no space left on device | approved | Disk freed. The second blocker (rmm-sign lacked definition signing and command-key generation) is fixed by the user-approved quick task bf347ff: `rmm-sign sign --type definition` and `rmm-sign keygen-command --out FILE` (prints public=<hex> and key_id=<hex>; pubkey prints `public_key: <hex>`). Re-run 06-04. |
 
 - #1 context: `/dev/vda` shows 354M available despite 39G used out of 252G. `docker builder prune` and `docker image prune` reclaimed almost nothing. Docker builds fail with ENOSPC.
 - #2 context: Plan 06-04's `dev-trust.sh` needs both, and `crates/` is forbidden to this plan.
