@@ -1,9 +1,9 @@
 # Project State
 
 ## Current Position
-- **Phase**: 3 of 9 (complete)
-- **Status**: Phase 3 complete — review passed (1 cycle(s))
-- **Last Activity**: Phase 3 review (2026-10-31)
+- **Phase**: 4 of 9 (planned)
+- **Status**: Phase 4 planned -- 3 plans across 2 waves
+- **Last Activity**: Phase 4 planning (2026-11-01)
 
 ## Progress
 ```
@@ -27,7 +27,7 @@
 - Open a pull request for the working branch through the GitHub MCP tools so CI runs on every push (replaces the earlier "no PR" default; gh CLI is not available)
 
 ## Next Action
-Run `/triad:plan 4` to plan Phase 4: Heartbeat, inventory and metrics
+Run `/triad:build` to execute Phase 4: Heartbeat, inventory and metrics
 
 ## Phase 1 Results
 (build started 2026-10-31)
