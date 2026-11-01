@@ -113,6 +113,12 @@ services:
       RMM_NATS_URL: ${RMM_NATS_URL:?set in deploy/.env}
       RMM_NATS_USER: ingest
       RMM_NATS_PASSWORD: ${RMM_NATS_INGEST_PASSWORD:?set in deploy/.env}
+      RMM_DATABASE_URL: ${RMM_DATABASE_URL:?set in deploy/.env}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      nats:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "/usr/local/bin/rmm-server", "healthcheck", "http://127.0.0.1:8081/healthz"]
       interval: 5s

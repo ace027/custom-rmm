@@ -3,6 +3,7 @@
 
 pub mod enroll;
 pub mod identity;
+pub mod telemetry;
 pub mod transport;
 
 use rmm_platform::Platform;

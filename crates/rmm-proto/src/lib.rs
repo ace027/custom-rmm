@@ -2,6 +2,7 @@
 
 pub mod canonical;
 pub mod enroll;
+pub mod telemetry;
 
 /// Version of the agent/server wire protocol.
 pub const PROTOCOL_VERSION: u16 = 1;

@@ -6,6 +6,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use rmm_agent_core::enroll::{self, EnrollError, EnrollOptions};
 use rmm_agent_core::identity;
+use rmm_agent_core::telemetry::{self as agent_telemetry, CancellationToken, Intervals};
 use rmm_agent_core::transport::{self, ConnState};
 
 const EXIT_FAILURE: u8 = 1;
@@ -93,6 +94,22 @@ async fn do_enroll(server: String, token: String, state_dir: Option<PathBuf>, fo
     }
 }
 
+/// Resolves on SIGINT, or SIGTERM on Unix.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        if let Ok(mut term) = signal(SignalKind::terminate()) {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = term.recv() => {}
+            }
+            return;
+        }
+    }
+    let _ = tokio::signal::ctrl_c().await;
+}
+
 async fn run(state_dir: Option<PathBuf>, once: bool) -> u8 {
     let dir = state_dir.unwrap_or_else(rmm_platform::default_state_dir);
     let ident = match identity::load(&dir) {
@@ -121,7 +138,7 @@ async fn run(state_dir: Option<PathBuf>, once: bool) -> u8 {
     let ca = extra_ca();
     let client = transport::connect_observed(&ident, &seed, ca.as_deref(), tx).await;
     seed.fill(0);
-    let _client = match client {
+    let client = match client {
         Ok(c) => c,
         Err(e) => {
             tracing::error!("{e}");
@@ -129,27 +146,52 @@ async fn run(state_dir: Option<PathBuf>, once: bool) -> u8 {
         }
     };
     tracing::info!(agent_id = %ident.agent_id, url = %ident.nats_url, "connecting");
-    loop {
+    let shutdown = CancellationToken::new();
+    let telemetry_task = (!once).then(|| {
+        let client = client.clone();
+        let ident = ident.clone();
+        let token = shutdown.clone();
+        tokio::spawn(async move {
+            let platform = rmm_platform::current();
+            if let Err(e) = agent_telemetry::run_telemetry(
+                client,
+                &ident,
+                platform,
+                Intervals::from_env_debug(),
+                token,
+            )
+            .await
+            {
+                tracing::error!("telemetry stopped: {e}");
+            }
+        })
+    });
+    let code = loop {
         tokio::select! {
             state = rx.recv() => match state {
                 Some(ConnState::Connected) => {
                     tracing::info!("nats connected");
                     if once {
-                        return 0;
+                        break 0;
                     }
                 }
                 Some(ConnState::Disconnected) => tracing::warn!("nats disconnected, retrying"),
                 Some(ConnState::Closed) | None => {
                     tracing::error!("nats connection closed");
-                    return EXIT_FAILURE;
+                    break EXIT_FAILURE;
                 }
             },
-            _ = tokio::signal::ctrl_c() => {
+            () = shutdown_signal() => {
                 tracing::info!("shutting down");
-                return 0;
+                break 0;
             }
         }
+    };
+    shutdown.cancel();
+    if let Some(task) = telemetry_task {
+        let _ = task.await;
     }
+    code
 }
 
 #[tokio::main]

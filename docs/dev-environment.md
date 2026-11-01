@@ -128,6 +128,49 @@ to NATS) in `deploy/.env`, which it makes mode 0600. To rotate, blank
 `RMM_AUTHD_ISSUER_SEED` and run `dev-up.sh` again. Plain
 `rmm-server gen-nkey --type user` prints a user key pair the same way.
 
+## Telemetry flow
+
+Agents publish on `telemetry.<client>.<agent>.<kind>` over the WebSocket:
+heartbeats (`hb`, core NATS), metric batches (`metric`) and inventory (`inv`),
+both JetStream publishes with a UUIDv7 `Nats-Msg-Id`. Payloads are CBOR
+(`rmm_proto::telemetry`) and carry no client or agent id: ingest takes both
+from the subject, which authd's per-agent JWT makes unforgeable, and checks
+them against `tenant.agent` (active, and the same client). Anything else is
+terminated and counted.
+
+`rmm-server ingest` creates the stream `TELEM` (`telemetry.>`, file storage,
+3 days, 2 minute duplicate window) and the durable pull consumer `ingest`
+(explicit acks, 30 s ack wait, 5 deliveries). It fetches up to 500 messages or
+1 s, then writes the batch in one `Scope::Service("ingest")` transaction as
+role `rmm_ingest`: heartbeats update `tenant.agent.last_seen`, a changed
+inventory updates `tenant.device` and writes one `inventory.changed` row in
+`tenant.device_event` (before/after hold exactly the changed columns), metric
+samples go to `ts_private.metrics` (samples older than 7 days or more than 5
+minutes ahead are dropped and counted). Messages are acknowledged after the
+commit; with the database down they are naked with a 5 s delay and `/healthz`
+(port 8081) turns 503. Counters are logged every 60 s.
+
+Debug agent builds read `RMM_AGENT_TELEMETRY_INTERVALS` (decimal seconds, for
+example `hb=2,metric=3,inv=5`) instead of the 30 s / 60 s / 6 h defaults.
+Intervals are clamped to at least 0.01 s; collecting one metric sample blocks
+the agent for about 200 ms, so it cannot publish faster than about 5 batches
+per second.
+
+Read metrics the way the API does, through the scoped view (no grants on
+`ts_private` for `rmm_api`):
+
+```
+docker compose -f deploy/compose.yaml exec -T timescale psql -U rmm -d rmm -c "
+BEGIN; SET LOCAL ROLE rmm_api; SET LOCAL rmm.service = 'off';
+SET LOCAL rmm.client_ids = '{<client-uuid>}';
+SELECT time, metric, value FROM tenant.metrics_v
+WHERE device_id = '<device-uuid>' ORDER BY time DESC LIMIT 20; COMMIT;"
+```
+
+`scripts/e2e-telemetry.sh` enrolls an agent and checks heartbeat, inventory
+and event, metrics, tenant isolation of `metrics_v`, a RAM change becoming an
+event, and ingest keeping up with a fast agent and a 10000 sample burst.
+
 ## Technician tokens in dev
 
 The api service runs with `RMM_AUTH_ALLOW_DEV=1`, audience `api://rmm-dev`,

@@ -103,6 +103,10 @@ jobs:
         env:
           RMM_HTTPS_PORT: "8443"
         run: scripts/e2e-enroll.sh
+      - name: End-to-end telemetry (heartbeat, inventory, metrics, scoping, throughput)
+        env:
+          RMM_HTTPS_PORT: "8443"
+        run: scripts/e2e-telemetry.sh
       - name: sqlx offline data is current
         env:
           SQLX_OFFLINE: "false"

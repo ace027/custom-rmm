@@ -1,12 +1,10 @@
 //! Server binary: api, ingest, authd and migrate run as separate processes.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use axum::{Router, extract::State, http::StatusCode, routing::get};
+use axum::Router;
 use clap::{Parser, Subcommand};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -15,6 +13,7 @@ use utoipa::OpenApi;
 mod api;
 mod authd;
 mod dev_token;
+mod ingest;
 mod natsjwt;
 
 /// RMM server.
@@ -168,64 +167,6 @@ async fn serve(addr: &str, app: Router) -> Result<()> {
     Ok(())
 }
 
-/// Health state shared with the NATS watcher.
-type Connected = Arc<AtomicBool>;
-
-async fn health_handler(State(connected): State<Connected>) -> StatusCode {
-    if connected.load(Ordering::Relaxed) {
-        StatusCode::OK
-    } else {
-        StatusCode::SERVICE_UNAVAILABLE
-    }
-}
-
-fn health_router(connected: Connected) -> Router {
-    Router::new()
-        .route("/healthz", get(health_handler))
-        .with_state(connected)
-}
-
-/// Connect to NATS (retrying with backoff in the background) and serve /healthz.
-async fn run_nats_service(name: &'static str, default_listen: &str) -> Result<()> {
-    let url = env_required("RMM_NATS_URL")?;
-    let user = env_required("RMM_NATS_USER")?;
-    let password = env_required("RMM_NATS_PASSWORD")?;
-    let listen = env_or("RMM_HEALTH_LISTEN", default_listen);
-    let connected: Connected = Arc::new(AtomicBool::new(false));
-
-    let watcher_state = connected.clone();
-    let watcher = tokio::spawn(async move {
-        let mut backoff = Duration::from_millis(500);
-        let client = loop {
-            let attempt =
-                async_nats::ConnectOptions::with_user_and_password(user.clone(), password.clone())
-                    .name(name)
-                    .retry_on_initial_connect()
-                    .connect(&url)
-                    .await;
-            match attempt {
-                Ok(c) => break c,
-                Err(err) => {
-                    tracing::warn!(%err, "nats connect failed, retrying");
-                    tokio::time::sleep(backoff).await;
-                    backoff = (backoff * 2).min(Duration::from_secs(10));
-                }
-            }
-        };
-        loop {
-            let up = client.connection_state() == async_nats::connection::State::Connected;
-            if watcher_state.swap(up, Ordering::Relaxed) != up {
-                tracing::info!(connected = up, "nats connection state changed");
-            }
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        }
-    });
-
-    let result = serve(&listen, health_router(connected)).await;
-    watcher.abort();
-    result
-}
-
 async fn run_migrate() -> Result<()> {
     let url = env_required("RMM_DATABASE_URL")?;
     let pool = rmm_db::connect(&url).await.context("connect database")?;
@@ -267,7 +208,7 @@ async fn main() -> Result<()> {
             let app = api::build_router().await?;
             serve(&env_or("RMM_API_LISTEN", "0.0.0.0:8080"), app).await?;
         }
-        Command::Ingest => run_nats_service("rmm-ingest", "0.0.0.0:8081").await?,
+        Command::Ingest => ingest::run().await?,
         Command::Authd => authd::run().await?,
         Command::GenNkey { kind } => println!("{}", gen_nkey(kind)?),
         Command::Migrate => run_migrate().await?,
@@ -278,8 +219,17 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::Request};
-    use tower::ServiceExt;
+    use axum::{extract::State, http::StatusCode, routing::get};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    async fn health_handler(State(up): State<Arc<AtomicBool>>) -> StatusCode {
+        if up.load(Ordering::Relaxed) {
+            StatusCode::OK
+        } else {
+            StatusCode::SERVICE_UNAVAILABLE
+        }
+    }
 
     #[test]
     fn parses_subcommands() {
@@ -345,26 +295,6 @@ mod tests {
         }
     }
 
-    async fn status_of(connected: bool) -> StatusCode {
-        let state: Connected = Arc::new(AtomicBool::new(connected));
-        health_router(state)
-            .oneshot(
-                Request::builder()
-                    .uri("/healthz")
-                    .body(Body::empty())
-                    .expect("request"),
-            )
-            .await
-            .expect("response")
-            .status()
-    }
-
-    #[tokio::test]
-    async fn health_handler_follows_state() {
-        assert_eq!(status_of(false).await, StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(status_of(true).await, StatusCode::OK);
-    }
-
     #[tokio::test]
     async fn healthcheck_against_local_server() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -372,7 +302,9 @@ mod tests {
             .expect("bind");
         let addr = listener.local_addr().expect("addr");
         let ok = Arc::new(AtomicBool::new(true));
-        let app = health_router(ok.clone());
+        let app = Router::new()
+            .route("/healthz", get(health_handler))
+            .with_state(ok.clone());
         tokio::spawn(async move { axum::serve(listener, app).await.ok() });
         let url = format!("http://{addr}/healthz");
         healthcheck(&url).await.expect("2xx");

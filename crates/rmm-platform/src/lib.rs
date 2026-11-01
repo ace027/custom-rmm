@@ -1,5 +1,6 @@
 //! Platform abstraction with per-OS implementations.
 
+pub mod collect;
 mod keystore;
 pub mod smbios;
 
