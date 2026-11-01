@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  RMM endpoint installer (WiX v5). Build with the xtask msi command (cargo run -p xtask, msi).
+
+  Required defines: -d Version=<x.y.z> -d BinDir=<dir holding rmm-agent.exe,
+  rmm-watchdog.exe and rmm-session.exe>. Extension: WixToolset.Util.wixext.
+
+  MSI-owned: the watchdog service and session helper (Program Files) and the
+  bootstrap copy of the agent (ProgramData\RMM\bootstrap). Everything the
+  watchdog or agent creates at runtime (updater directories, state files,
+  agent identity) is deliberately NOT a component, so repair and upgrade never
+  overwrite it. Only a full uninstall wipes the whole ProgramData\RMM tree.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="RMM Agent"
+           Manufacturer="RMM"
+           Version="$(Version)"
+           UpgradeCode="2F2C502D-D040-4141-9696-2CD23FCCEEB5"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of RMM Agent is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Public properties. The token never reaches the log, disk or registry. -->
+    <Property Id="SERVER_URL" Secure="yes" />
+    <Property Id="ENROLL_TOKEN" Secure="yes" Hidden="yes" />
+    <!-- Holds the enroll command line (contains the token) for the deferred action. -->
+    <Property Id="RmmEnroll" Value="-" Hidden="yes" />
+
+    <Launch Condition="NOT ENROLL_TOKEN OR SERVER_URL"
+            Message="SERVER_URL is required when ENROLL_TOKEN is set." />
+
+    <!-- Data root recorded at install so uninstall can find it (RemoveFolderEx needs a property). -->
+    <Property Id="RMM_DATA_DIR">
+      <RegistrySearch Id="RmmDataDirSearch" Root="HKLM" Key="Software\RMM\Installer"
+                      Name="DataDir" Type="raw" Bitness="always64" />
+    </Property>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="RMM" />
+    </StandardDirectory>
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="DataRoot" Name="RMM">
+        <Directory Id="BootstrapDir" Name="bootstrap" />
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="RMM Agent" Level="1">
+      <ComponentRef Id="WatchdogService" />
+      <ComponentRef Id="SessionHelper" />
+      <ComponentRef Id="BootstrapAgent" />
+      <ComponentRef Id="DataRootCleanup" />
+    </Feature>
+
+    <Component Id="WatchdogService" Directory="INSTALLFOLDER" Bitness="always64">
+      <File Id="WatchdogExe" Source="$(BinDir)\rmm-watchdog.exe" KeyPath="yes">
+        <!-- Runs "rmm-watchdog.exe service" as LocalSystem. -->
+        <ServiceInstall Id="RmmWatchdogSvc" Name="RMMWatchdog" DisplayName="RMM Watchdog"
+                        Description="Keeps the RMM agent running and applies verified updates."
+                        Type="ownProcess" Start="auto" ErrorControl="normal"
+                        Account="LocalSystem" Arguments="service" Vital="yes">
+          <util:ServiceConfig FirstFailureActionType="restart"
+                              SecondFailureActionType="restart"
+                              ThirdFailureActionType="restart"
+                              RestartServiceDelayInSeconds="5"
+                              ResetPeriodInDays="1" />
+        </ServiceInstall>
+        <ServiceControl Id="RmmWatchdogCtl" Name="RMMWatchdog" Start="install"
+                        Stop="both" Remove="uninstall" Wait="yes" />
+      </File>
+    </Component>
+
+    <Component Id="SessionHelper" Directory="INSTALLFOLDER" Bitness="always64">
+      <File Id="SessionExe" Source="$(BinDir)\rmm-session.exe" KeyPath="yes" />
+      <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                     Name="RMMSession" Type="string"
+                     Value="&quot;[INSTALLFOLDER]rmm-session.exe&quot;" />
+    </Component>
+
+    <Component Id="BootstrapAgent" Directory="BootstrapDir" Bitness="always64">
+      <File Id="BootstrapAgentExe" Source="$(BinDir)\rmm-agent.exe" KeyPath="yes" />
+    </Component>
+
+    <Component Id="DataRootCleanup" Directory="DataRoot" Bitness="always64">
+      <RegistryValue Root="HKLM" Key="Software\RMM\Installer" Name="DataDir" Type="string"
+                     Value="[CommonAppDataFolder]RMM" KeyPath="yes" />
+      <!-- RMM_WIPE_DIR is only set on a full uninstall (see below). -->
+      <util:RemoveFolderEx On="uninstall" Property="RMM_WIPE_DIR" />
+    </Component>
+
+    <!-- Full uninstall only: never on upgrade, repair or change. -->
+    <SetProperty Id="RMM_WIPE_DIR" Value="[RMM_DATA_DIR]" Sequence="execute"
+                 After="CostFinalize"
+                 Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+
+    <!-- Enrollment: first install with a token only; a failure rolls the install back. -->
+    <CustomAction Id="RmmEnrollData" Property="RmmEnroll" HideTarget="yes"
+                  Value="&quot;[BootstrapDir]rmm-agent.exe&quot; enroll --server &quot;[SERVER_URL]&quot; --token &quot;[ENROLL_TOKEN]&quot; --if-not-enrolled" />
+    <CustomAction Id="RmmEnrollRun" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="deferred" Impersonate="no" Return="check" />
+
+    <InstallExecuteSequence>
+      <Custom Action="RmmEnrollData" After="InstallFiles"
+              Condition="NOT Installed AND ENROLL_TOKEN" />
+      <Custom Action="RmmEnrollRun" After="RmmEnrollData"
+              Condition="NOT Installed AND ENROLL_TOKEN" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

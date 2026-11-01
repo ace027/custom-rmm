@@ -1,9 +1,11 @@
 //! Developer automation: `cargo run -p xtask -- openapi [--check]` and
 //! `cargo run -p xtask -- action-fixtures [--out DIR]` and
+//! `cargo run -p xtask -- msi [--out DIR] [--no-build] [--dry-run]` and
 //! `cargo run -p xtask -- fake-authn ca|register|assert` (dev and CI only).
 
 mod action_fixtures;
 mod fake_authn;
+mod msi;
 
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
@@ -60,9 +62,10 @@ fn main() -> ExitCode {
                 None => Err("--out needs a directory".to_string()),
             }
         }
+        Some("msi") => msi::run_msi(&root(), &args[1..]),
         Some("fake-authn") => fake_authn::run(&args[1..]),
         _ => Err(
-            "usage: xtask openapi [--check] | action-fixtures [--out DIR] | fake-authn ca|register|assert"
+            "usage: xtask openapi [--check] | action-fixtures [--out DIR] | msi [--out DIR] [--no-build] [--dry-run] | fake-authn ca|register|assert"
                 .to_string(),
         ),
     };

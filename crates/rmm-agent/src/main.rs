@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use rmm_agent_core::blocks::PlatformBlocks;
 use rmm_agent_core::commands::{self, Agent, IntakeOptions};
 use rmm_agent_core::enroll::{self, EnrollError, EnrollOptions};
@@ -39,15 +39,18 @@ enum Command {
         /// Server base URL, e.g. https://rmm.example.com
         #[arg(long)]
         server: String,
-        /// One-time enrollment token (rmmenr_...).
+        /// One-time enrollment token (rmmenr_...); falls back to RMM_ENROLL_TOKEN.
         #[arg(long)]
-        token: String,
+        token: Option<String>,
         /// State directory (default: platform specific).
         #[arg(long)]
         state_dir: Option<PathBuf>,
         /// Replace an existing enrollment.
         #[arg(long)]
         force: bool,
+        /// Exit 0 without contacting the server when already enrolled.
+        #[arg(long)]
+        if_not_enrolled: bool,
     },
     /// Connect to the server and stay connected.
     Run {
@@ -69,8 +72,27 @@ fn extra_ca() -> Option<PathBuf> {
     }
 }
 
-async fn do_enroll(server: String, token: String, state_dir: Option<PathBuf>, force: bool) -> u8 {
+async fn do_enroll(
+    server: String,
+    token: String,
+    state_dir: Option<PathBuf>,
+    force: bool,
+    if_not_enrolled: bool,
+) -> u8 {
     let dir = state_dir.unwrap_or_else(rmm_platform::default_state_dir);
+    if if_not_enrolled && !force {
+        match identity::load(&dir) {
+            Ok(Some(_)) => {
+                tracing::info!("already enrolled");
+                return 0;
+            }
+            Ok(None) => {}
+            Err(e) => {
+                tracing::error!("load identity: {e}");
+                return EXIT_FAILURE;
+            }
+        }
+    }
     let http = match enroll::http_client(extra_ca().as_deref()) {
         Ok(h) => h,
         Err(e) => {
@@ -360,7 +382,21 @@ async fn main() -> ExitCode {
             token,
             state_dir,
             force,
-        }) => do_enroll(server, token, state_dir, force).await,
+            if_not_enrolled,
+        }) => {
+            let token = token
+                .or_else(|| std::env::var("RMM_ENROLL_TOKEN").ok())
+                .filter(|t| !t.is_empty());
+            let Some(token) = token else {
+                Cli::command()
+                    .error(
+                        clap::error::ErrorKind::MissingRequiredArgument,
+                        "a token is required: pass --token or set RMM_ENROLL_TOKEN",
+                    )
+                    .exit()
+            };
+            do_enroll(server, token, state_dir, force, if_not_enrolled).await
+        }
         Some(Command::Run { state_dir, once }) => run(state_dir, once).await,
         None => {
             println!("rmm-agent: {}", rmm_agent_core::identity());
