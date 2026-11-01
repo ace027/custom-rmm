@@ -58,7 +58,7 @@
 ## Escalations
 | # | Severity | Type | Decision | Status | Resolution |
 |---|----------|------|----------|--------|------------|
-| 1 | blocker | quality | Resolve: ENVIRONMENT issue persisted after one automatic retry: #4 ERROR: unexpected status from HEAD request to https://registry-1.docker.io/v2/library/rust/manifests/1.97.0-bookworm: 429 Too Many Requests | pending |  |
+| 1 | blocker | quality | Resolve: ENVIRONMENT issue persisted after one automatic retry: #4 ERROR: unexpected status from HEAD request to https://registry-1.docker.io/v2/library/rust/manifests/1.97.0-bookworm: 429 Too Many Requests | approved | Docker Hub 429 worked around by pulling rust:1.97.0-bookworm and debian:bookworm-slim from mirror.gcr.io and tagging them locally; burst msg_ids now get a random per-run prefix. Re-run the build. |
 
 - #1 context: Verification failed (RMM_HTTPS_PORT=8443 scripts/e2e-offline.sh; RMM_HTTPS_PORT=8443 scripts/e2e-telemetry.sh; DATABASE_URL=postgres://rmm:$(grep '^RMM_PG_PASSWORD=' deploy/.env.example / cut -d= -f2)@127.0.0.1:5432/rmm cargo test -p rmm-db -p rmm-server --locked); a BLOCKER is not auto-fixed.
 
