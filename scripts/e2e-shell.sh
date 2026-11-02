@@ -82,7 +82,9 @@ cleanup() {
   # Leave the dev database without this run's technician: the techlist stored
   # last (check 7) already excludes it, and its sessions and recordings go.
   if [[ -n $TECH && -n $C1 ]]; then
-    q "delete from tenant.shell_session where tech_id = '$TECH';
+    q "delete from tenant.shell_ws_ticket where grant_id in (select grant_id from tenant.shell_session where tech_id = '$TECH');
+       delete from tenant.shell_session where tech_id = '$TECH';
+       delete from msp.webauthn_challenge where tech_id = '$TECH';
        delete from msp.webauthn_credential where tech_id = '$TECH';
        delete from msp.technician_client where tech_id = '$TECH';
        delete from msp.technician where tech_id = '$TECH'" >/dev/null 2>&1 || true
