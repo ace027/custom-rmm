@@ -125,7 +125,10 @@ mod imp {
         }
         let listener = UnixListener::bind(&path)
             .map_err(|e| PlatformError::Os(format!("bind {}: {e}", path.display())))?;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+        // Connecting to a unix socket needs write permission on it, so local
+        // users (the session helper runs as the logged-in user) need 0666.
+        // Clients cannot affect the agent: the server never reads from them.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666))
             .map_err(|e| PlatformError::Os(format!("chmod {}: {e}", path.display())))?;
         let task = tokio::spawn(async move {
             loop {

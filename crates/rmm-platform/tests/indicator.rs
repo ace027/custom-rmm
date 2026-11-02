@@ -26,7 +26,7 @@ async fn broadcasts_latest_state() {
     let server = IndicatorServer::start(Some(path.clone())).expect("start");
     assert_eq!(
         std::fs::metadata(&path).expect("meta").permissions().mode() & 0o777,
-        0o644
+        0o666
     );
 
     let mut c1 = BufReader::new(UnixStream::connect(&path).await.expect("c1"));
