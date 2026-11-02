@@ -100,9 +100,15 @@ try {
     $leak = Select-String -LiteralPath $log1 -Pattern $TestToken -SimpleMatch -Quiet
     if ($leak) { Get-TokenLeak $log1 | Write-Host }
     Check 'log does not contain the token' (-not $leak) "$log1 contains the enrollment token"
-    # The failure must come from the agent actually running, not from an empty command.
-    $ran = Select-String -LiteralPath $log1 -Pattern 'server unreachable' -SimpleMatch -Quiet
-    Check 'rollback: failure came from the agent (server unreachable in log)' $ran "$log1 has no agent error text"
+    # The failure must come from the enroll action, not from some other step.
+    # HideTarget on that action also hides the agent's output, so match the
+    # installer's own result line for it instead of the agent's error text.
+    $ran = Select-String -LiteralPath $log1 -Pattern 'RmmEnrollRun.*(Return value 3|returned actual error code)' -Quiet
+    if (-not $ran) {
+        Select-String -LiteralPath $log1 -Pattern 'RmmEnroll|Return value 3' |
+            Select-Object -First 15 | ForEach-Object { "  line $($_.LineNumber): " + $_.Line.Replace($TestToken, '<TOKEN>') } | Write-Host
+    }
+    Check 'rollback: the enroll action is what failed' $ran "$log1 shows no failure of RmmEnrollRun"
 
     # 1b. Successful enrollment against a local stub server (loopback http is accepted).
     $port = 18943
