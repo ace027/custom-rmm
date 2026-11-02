@@ -93,8 +93,10 @@
     </Component>
 
     <!-- Full uninstall only: never on upgrade, repair or change. -->
+    <!-- Must be set before util's RemoveFolderEx action reads it (it runs
+         before CostInitialize). -->
     <SetProperty Id="RMM_WIPE_DIR" Value="[RMM_DATA_DIR]" Sequence="execute"
-                 After="CostFinalize"
+                 Before="Wix4RemoveFoldersEx_X64"
                  Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
 
     <!-- Enrollment: first install with a token only; a failure rolls the install back. -->
