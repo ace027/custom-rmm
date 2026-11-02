@@ -354,6 +354,17 @@ pub async fn enroll(
     }
     tx.commit().await?;
 
+    // Best effort: the consumer is also ensured before every command is issued.
+    if let Some(nats) = &state.nats
+        && let Err(err) = crate::actions::ensure_agent_consumer(
+            &async_nats::jetstream::new(nats.clone()),
+            agent_id,
+        )
+        .await
+    {
+        tracing::warn!(%err, %agent_id, "could not create the agent command consumer");
+    }
+
     Ok((
         StatusCode::CREATED,
         Json(EnrollResponse {

@@ -32,6 +32,7 @@ windows = { version = "0.62", features = [
     "Win32_Storage_FileSystem",
     "Win32_System_Memory",
     "Win32_System_Registry",
+    "Win32_System_Services",
     "Win32_System_SystemInformation",
     "Win32_System_Threading",
 ] }
@@ -50,13 +51,17 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "j
 nkeys = "0.4"
 jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs"] }
 data-encoding = "2"
+semver = "1"
 uuid = { version = "1", features = ["v4", "v7", "serde"] }
 rand = "0.10"
 sysinfo = { version = "0.40", default-features = false, features = ["system", "disk"] }
 tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
 zeroize = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+chacha20poly1305 = "0.11"
 openpgp-card = "0.7"
 card-backend-pcsc = "0.5"
+portable-pty = "0.9"
 
 rmm-proto = { path = "crates/rmm-proto" }
 rmm-trust = { path = "crates/rmm-trust" }

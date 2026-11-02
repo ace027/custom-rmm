@@ -41,11 +41,49 @@ pub async fn build_router() -> Result<Router> {
     let nats_public_url = crate::env_or("RMM_NATS_PUBLIC_URL", "wss://localhost/nats");
     let nats = connect_nats().await?;
 
-    Ok(rmm_api::router(AppState::new(
-        pool,
-        authenticator,
-        nats,
-        roots,
-        nats_public_url,
-    )))
+    let command_key = match std::env::var("RMM_COMMAND_KEY_FILE") {
+        Ok(path) => match rmm_api::load_command_key(std::path::Path::new(&path)) {
+            Ok(key) => Some(key),
+            Err(err) => {
+                tracing::error!(%err, "command key unusable; the issue endpoint answers 503");
+                None
+            }
+        },
+        Err(_) => {
+            tracing::warn!("RMM_COMMAND_KEY_FILE is not set; the issue endpoint answers 503");
+            None
+        }
+    };
+
+    let state = AppState::new(pool, authenticator, nats, roots, nats_public_url)
+        .with_command_key(command_key);
+
+    let retention_days: u32 = crate::env_or(
+        "RMM_RECORDING_RETENTION_DAYS",
+        &rmm_api::recording::DEFAULT_RETENTION_DAYS.to_string(),
+    )
+    .parse()
+    .context("RMM_RECORDING_RETENTION_DAYS must be a number of days")?;
+    anyhow::ensure!(
+        retention_days >= 1,
+        "RMM_RECORDING_RETENTION_DAYS must be at least 1"
+    );
+    tracing::info!(
+        dir = %state.recording_dir.display(),
+        retention_days,
+        "shell recordings"
+    );
+    tokio::spawn(rmm_api::recording::retention_loop(
+        state.clone(),
+        retention_days,
+    ));
+
+    // Agents fetch the latest trust documents and release over NATS.
+    tracing::info!(dir = %state.artifact_dir.display(), "release artifacts");
+    rmm_api::artifacts::sweep_stale(&state.artifact_dir);
+    if rmm_api::distribution::spawn(&state).is_none() {
+        tracing::warn!("no NATS client; trust and release distribution is disabled");
+    }
+
+    Ok(rmm_api::router(state))
 }

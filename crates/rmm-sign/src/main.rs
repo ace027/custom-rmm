@@ -1,5 +1,6 @@
 //! Offline signing CLI. The only tool that produces trust signatures.
 
+mod aaguid;
 mod card_backend;
 mod cli;
 mod drafts;

@@ -37,6 +37,9 @@ use rmm_proto::telemetry::{
 use serde_json::Value;
 use uuid::Uuid;
 
+#[path = "results.rs"]
+pub mod results;
+
 /// Name of the JetStream stream holding all telemetry.
 pub const STREAM: &str = "TELEM";
 /// Name of the durable pull consumer.
@@ -59,6 +62,10 @@ const MAX_METRIC_NAME: usize = 200;
 const CHECK_EVERY: Duration = Duration::from_secs(10);
 /// How old the last good database contact may be for /healthz to pass.
 const DB_MAX_AGE_SECS: u64 = 30;
+/// Dedupe records older than this are deleted.
+const DEDUPE_RETENTION: Duration = Duration::from_secs(7 * 24 * 3600);
+/// How often the dedupe table is pruned.
+const PRUNE_EVERY: Duration = Duration::from_secs(3600);
 /// Role the ingest pool switches to on every connection.
 const DB_ROLE: &str = "rmm_ingest";
 
@@ -132,15 +139,19 @@ pub struct Health {
     pub consumer_ok: AtomicBool,
     /// Unix time of the last successful database write or check (0 = never).
     pub db_ok_at: AtomicU64,
+    /// The result consumer could not be set up or has gone missing.
+    pub results_failed: AtomicBool,
 }
 
 impl Health {
-    /// Healthy when NATS is connected, the consumer exists and the database
-    /// answered within the last 30 s.
+    /// Healthy when NATS is connected, the consumers exist (the result
+    /// consumer counts once it has failed) and the database answered within
+    /// the last 30 s.
     pub fn healthy(&self, now: u64) -> bool {
         let db = self.db_ok_at.load(Ordering::Relaxed);
         self.nats_up.load(Ordering::Relaxed)
             && self.consumer_ok.load(Ordering::Relaxed)
+            && !self.results_failed.load(Ordering::Relaxed)
             && db != 0
             && now.saturating_sub(db) <= DB_MAX_AGE_SECS
     }
@@ -193,6 +204,8 @@ pub struct Stats {
     pub identity_mismatch: AtomicU64,
     /// Batches that failed on the database (and were naked).
     pub db_errors: AtomicU64,
+    /// Inventory and metric messages acked without writing (msg_id seen before).
+    pub duplicates: AtomicU64,
 }
 
 impl Stats {
@@ -218,6 +231,7 @@ impl Stats {
             inactive_agent = Self::get(&self.inactive_agent),
             identity_mismatch = Self::get(&self.identity_mismatch),
             db_errors = Self::get(&self.db_errors),
+            duplicates = Self::get(&self.duplicates),
             "ingest counters"
         );
     }
@@ -303,6 +317,17 @@ enum Parsed {
     Hb(Heartbeat),
     Inv(Box<Inventory>),
     Metric(MetricBatch),
+}
+
+impl Parsed {
+    /// The message id used for durable dedupe (inventory and metrics only).
+    fn msg_id(&self) -> Option<Uuid> {
+        match self {
+            Self::Hb(_) => None,
+            Self::Inv(i) => Some(i.msg_id),
+            Self::Metric(m) => Some(m.msg_id),
+        }
+    }
 }
 
 struct Item {
@@ -448,6 +473,17 @@ impl Processor {
         cache.insert(row.agent_id, (Instant::now(), row.clone()));
     }
 
+    /// Delete dedupe records older than the retention.
+    pub async fn prune(&self) -> Result<u64, DbError> {
+        let mut tx = self.db.begin().await?;
+        let cutoff = SystemTime::now()
+            .checked_sub(DEDUPE_RETENTION)
+            .unwrap_or(UNIX_EPOCH);
+        let n = telemetry::prune_ingested(&mut tx, cutoff.into()).await?;
+        tx.commit().await?;
+        Ok(n)
+    }
+
     /// Handle one batch. Identity (client and agent) comes from the subject
     /// and is checked against the agent row; all writes share one
     /// transaction, so a database failure naks every message that needed it.
@@ -524,10 +560,7 @@ impl Processor {
 
         let at = ms_to_time(now_ms);
         let mut verdicts = Vec::with_capacity(items.len());
-        let mut rows: Vec<MetricRow> = Vec::new();
-        let mut dropped = 0u64;
-        let mut heartbeats = 0u64;
-        let (mut changed, mut unchanged) = (0u64, 0u64);
+        let mut valid: Vec<(&Item, &AgentTelemetryRow)> = Vec::with_capacity(items.len());
         for it in items {
             let Some(Some(agent)) = agents.get(&it.agent) else {
                 Stats::bump(&self.stats.unknown_agent);
@@ -544,6 +577,32 @@ impl Processor {
                 tracing::warn!(subject_client = %it.client, agent = %it.agent, "subject client is not the agent's client");
                 verdicts.push((it.idx, false));
                 continue;
+            }
+            valid.push((it, agent));
+        }
+
+        // Durable dedupe: claim the msg_id of every inventory and metric
+        // message in this transaction; an id that was already recorded (an
+        // earlier batch, or earlier in this one) is acked without writing.
+        let ids: Vec<Uuid> = valid
+            .iter()
+            .filter_map(|(it, _)| it.parsed.msg_id())
+            .collect();
+        let mut claimed = telemetry::claim_msg_ids(&mut tx, &ids).await?;
+
+        let mut rows: Vec<MetricRow> = Vec::new();
+        let mut dropped = 0u64;
+        let mut heartbeats = 0u64;
+        let mut duplicates = 0u64;
+        let (mut changed, mut unchanged) = (0u64, 0u64);
+        for (it, agent) in valid {
+            if let Some(id) = it.parsed.msg_id() {
+                // `remove` makes a repeat of the same id in this batch a duplicate.
+                if !claimed.remove(&id) {
+                    duplicates += 1;
+                    verdicts.push((it.idx, true));
+                    continue;
+                }
             }
             match &it.parsed {
                 Parsed::Hb(hb) => {
@@ -594,6 +653,7 @@ impl Processor {
         add(&self.stats.inventory_unchanged, unchanged);
         add(&self.stats.metric_rows, inserted);
         add(&self.stats.samples_dropped, dropped);
+        add(&self.stats.duplicates, duplicates);
         Ok(verdicts)
     }
 }
@@ -673,7 +733,10 @@ fn consumer_config() -> consumer::pull::Config {
         durable_name: Some(CONSUMER.to_owned()),
         ack_policy: consumer::AckPolicy::Explicit,
         ack_wait: Duration::from_secs(30),
-        max_deliver: 5,
+        // Unlimited: a long database outage must not exhaust the delivery
+        // budget, because the agent already deleted its copy on the stream ack.
+        // Permanently bad messages are terminated explicitly instead.
+        max_deliver: -1,
         ..Default::default()
     }
 }
@@ -715,6 +778,18 @@ async fn check_loop(client: async_nats::Client, js: jetstream::Context, proc: Ar
             }
         }
         tokio::time::sleep(CHECK_EVERY).await;
+    }
+}
+
+/// Prune the dedupe table once an hour.
+async fn prune_loop(proc: Arc<Processor>) {
+    loop {
+        match proc.prune().await {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(deleted = n, "pruned ingest dedupe records"),
+            Err(err) => tracing::warn!(%err, "ingest dedupe prune failed"),
+        }
+        tokio::time::sleep(PRUNE_EVERY).await;
     }
 }
 
@@ -823,9 +898,21 @@ async fn worker(cfg: Arc<Config>, health: Arc<Health>) {
         }
     };
     tracing::info!("ingest consuming");
+    let results_db = loop {
+        match Db::connect(&cfg.database_url).await {
+            Ok(db) => break db,
+            Err(err) => {
+                tracing::warn!(%err, "database connect failed, retrying");
+                tokio::time::sleep(backoff).await;
+                backoff = next(backoff);
+            }
+        }
+    };
+    tokio::spawn(results::run(js.clone(), results_db, health.clone()));
     let proc = Arc::new(Processor::new(db, health));
     tokio::spawn(check_loop(client, js, proc.clone()));
     tokio::spawn(log_loop(proc.clone()));
+    tokio::spawn(prune_loop(proc.clone()));
     consume_loop(consumer, proc).await;
 }
 

@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select cmd_id, client_id, agent_id, device_id, definition_content_id, params,\n                  requested_by, status, reason, stages, created_at, finished_at\n           from tenant.action_run where cmd_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cmd_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "client_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "agent_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "device_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "definition_content_id",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 5,
+        "name": "params",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "requested_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "stages",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "finished_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "f69ce15fc3aaeae0d6e14add0d47b84139fe7d6220a448e3582bd92ad08ab61a"
+}

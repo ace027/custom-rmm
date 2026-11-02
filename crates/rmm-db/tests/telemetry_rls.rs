@@ -360,3 +360,57 @@ async fn device_event_rls_isolates_clients(pool: PgPool) {
             .is_empty()
     );
 }
+
+#[sqlx::test(migrations = "./migrations")]
+async fn claim_msg_ids_returns_only_new_ids(pool: PgPool) {
+    let (a, b, c) = (Uuid::from_u128(1), Uuid::from_u128(2), Uuid::from_u128(3));
+    let mut tx = tx_as(&pool, "rmm_ingest", Scope::Service("test-ingest")).await;
+    let first = telemetry::claim_msg_ids(&mut tx, &[a, b, b]).await.unwrap();
+    assert_eq!(first, [a, b].into_iter().collect());
+    tx.commit().await.unwrap();
+
+    let mut tx = tx_as(&pool, "rmm_ingest", Scope::Service("test-ingest")).await;
+    let second = telemetry::claim_msg_ids(&mut tx, &[b, c]).await.unwrap();
+    assert_eq!(second, [c].into_iter().collect());
+    assert!(
+        telemetry::claim_msg_ids(&mut tx, &[])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    tx.commit().await.unwrap();
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn prune_ingested_deletes_only_old_records(pool: PgPool) {
+    let (old, fresh) = (Uuid::from_u128(10), Uuid::from_u128(11));
+    let mut tx = tx_as(&pool, "rmm_ingest", Scope::Service("test-ingest")).await;
+    telemetry::claim_msg_ids(&mut tx, &[old, fresh])
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    sqlx::query("update ts_private.ingested_msg set received_at = now() - interval '8 days' where msg_id = $1")
+        .bind(old)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let mut tx = tx_as(&pool, "rmm_ingest", Scope::Service("test-ingest")).await;
+    let cutoff = DateTime::from_timestamp(Utc::now().timestamp() - 7 * 86_400, 0).unwrap();
+    assert_eq!(telemetry::prune_ingested(&mut tx, cutoff).await.unwrap(), 1);
+    let again = telemetry::claim_msg_ids(&mut tx, &[old, fresh])
+        .await
+        .unwrap();
+    assert_eq!(again, [old].into_iter().collect());
+    tx.commit().await.unwrap();
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn rmm_api_cannot_read_the_dedupe_table(pool: PgPool) {
+    let mut tx = tx_as(&pool, "rmm_api", Scope::Service("test-api")).await;
+    let err = sqlx::query("select count(*) from ts_private.ingested_msg")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("permission denied"), "{err}");
+}

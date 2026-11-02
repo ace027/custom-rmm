@@ -1,10 +1,16 @@
 //! Platform abstraction with per-OS implementations.
 
 pub mod collect;
+#[cfg(debug_assertions)]
+pub mod fake;
+pub mod indicator;
 mod keystore;
+pub mod pty;
+pub mod quarantine;
+pub mod services;
 pub mod smbios;
 
-pub use keystore::{KeyStore, default_state_dir, keystore};
+pub use keystore::{KeyStore, default_state_dir, keystore, keystore_named};
 pub use rmm_proto::enroll::HwFacts;
 
 #[cfg(target_os = "linux")]
@@ -27,6 +33,16 @@ pub enum PlatformError {
     /// An operating-system call failed.
     #[error("os error: {0}")]
     Os(String),
+    /// The operation is not implemented on this platform.
+    #[error("unsupported: {0}")]
+    Unsupported(String),
+    /// The operation did not finish in time.
+    #[error("timed out: {0}")]
+    Timeout(String),
+    /// The request was refused before anything was changed (not allowlisted,
+    /// would overwrite, invalid input).
+    #[error("refused: {0}")]
+    Refused(String),
 }
 
 /// Operating-system services needed by the agent.

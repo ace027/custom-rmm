@@ -1,5 +1,7 @@
 //! Telemetry repositories: heartbeat, inventory, device events and metrics.
 
+use std::collections::HashSet;
+
 use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::types::{JsonValue, Uuid};
 
@@ -108,6 +110,7 @@ struct Current {
     cpu_cores: Option<i32>,
     ram_bytes: Option<i64>,
     disk_total_bytes: Option<i64>,
+    #[allow(dead_code)] // selected to keep the query shape; never diffed (volatile)
     disk_free_bytes: Option<i64>,
     last_boot: Option<DateTime<Utc>>,
     inventory_hash: Option<Vec<u8>>,
@@ -162,7 +165,7 @@ pub async fn apply_inventory(
     field!(cpu_cores);
     field!(ram_bytes);
     field!(disk_total_bytes);
-    field!(disk_free_bytes);
+    // disk_free_bytes is volatile: updated below but never diffed into an event.
     if cur.last_boot != inv.last_boot {
         changed.push("last_boot".to_owned());
         before.push(("last_boot".to_owned(), ts_json(cur.last_boot)));
@@ -187,6 +190,10 @@ pub async fn apply_inventory(
     )
     .execute(&mut **tx)
     .await?;
+
+    if changed.is_empty() {
+        return Ok(Some(changed));
+    }
 
     sqlx::query!(
         "insert into tenant.device_event (client_id, device_id, at, type, before, after) \
@@ -224,6 +231,34 @@ pub async fn insert_metrics(tx: &mut Tx<'_>, rows: &[MetricRow]) -> Result<u64> 
         &devices,
         &names,
         &values
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(res.rows_affected())
+}
+
+/// Record `ids` as ingested; returns the ids that were newly claimed. An id
+/// that is already recorded (or repeated in `ids`) is not returned, so the
+/// caller skips its message. Run in the transaction that writes the message.
+pub async fn claim_msg_ids(tx: &mut Tx<'_>, ids: &[Uuid]) -> Result<HashSet<Uuid>> {
+    if ids.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let claimed = sqlx::query_scalar!(
+        "insert into ts_private.ingested_msg (msg_id) select * from unnest($1::uuid[]) \
+         on conflict do nothing returning msg_id",
+        ids
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(claimed.into_iter().collect())
+}
+
+/// Delete dedupe records received before `older_than`; returns rows deleted.
+pub async fn prune_ingested(tx: &mut Tx<'_>, older_than: DateTime<Utc>) -> Result<u64> {
+    let res = sqlx::query!(
+        "delete from ts_private.ingested_msg where received_at < $1",
+        older_than
     )
     .execute(&mut **tx)
     .await?;

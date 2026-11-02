@@ -1,7 +1,10 @@
 //! Database access layer: pool, migrations, scoped transactions and repositories.
 
+pub mod actions;
+pub mod releases;
 pub mod repo;
 pub mod scope;
+pub mod shell;
 pub mod telemetry;
 
 use std::time::{Duration, Instant};

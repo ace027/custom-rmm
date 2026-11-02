@@ -10,6 +10,13 @@ version.workspace = true
 [dependencies]
 rmm-proto.workspace = true
 rmm-trust.workspace = true
+serde.workspace = true
+ciborium.workspace = true
+thiserror.workspace = true
+semver.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true

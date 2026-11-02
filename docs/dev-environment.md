@@ -171,6 +171,44 @@ WHERE device_id = '<device-uuid>' ORDER BY time DESC LIMIT 20; COMMIT;"
 and event, metrics, tenant isolation of `metrics_v`, a RAM change becoming an
 event, and ingest keeping up with a fast agent and a 10000 sample burst.
 
+`scripts/e2e-offline.sh` stops nginx for 60 s while an agent runs with fast
+intervals, restarts it, and checks that every queued sample arrives, that
+`ts_private.metrics` has no duplicate `(time, metric)` rows, that a hard-killed
+agent restarted while offline still delivers its queue exactly once, and that
+`agent-store.db` holds no metric name in clear.
+
+## Agent local store and offline queue
+
+The agent keeps an encrypted SQLite store in its state dir (default:
+platform specific; `--state-dir` overrides it):
+
+- `agent-store.db` (plus `-wal` and `-shm`): the outbox of metric and
+  inventory messages not yet acknowledged by the server, the command replay
+  cache, trust sequence floors and the trust and policy caches. Values are
+  sealed with XChaCha20-Poly1305; row ids, subjects, priorities, timestamps and
+  sizes are readable.
+- `store.key`: the random 32-byte store key, protected like `agent.key`
+  (0600 on Unix, DPAPI on Windows). If the database exists without this file
+  the agent refuses to start rather than begin a new store; delete both files
+  to reset a dev agent.
+
+Metrics and inventory are written to the outbox first and deleted only after the
+JetStream ack, so an outage or agent restart loses nothing. The outbox holds up
+to 50000 rows or 64 MiB; when full the oldest metric batches are dropped first
+(inventory is kept) and the drops are logged. After a reconnect it drains by
+priority (inventory, then metrics) and then by age. Ingest dedupes by `msg_id`
+in `ts_private.ingested_msg` (kept 7 days), so re-sent rows are written once.
+
+Inspect the queue length (row counts are not secret; payloads are):
+
+```
+sudo python3 -c 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); \
+print(c.execute("select priority, count(*) from outbox group by priority").fetchall())' \
+  <state-dir>/agent-store.db
+```
+
+Or with the sqlite3 CLI: `sudo sqlite3 <state-dir>/agent-store.db 'select count(*) from outbox'`.
+
 ## Technician tokens in dev
 
 The api service runs with `RMM_AUTH_ALLOW_DEV=1`, audience `api://rmm-dev`,
@@ -201,3 +239,85 @@ publish and subscribe (via `natsio/nats-box` with the agent's seed from
 clone flagging. It runs the agent as root in a private mount namespace with a
 fake `/sys/class/dmi`, so it needs root or passwordless sudo. It leaves the
 stack running.
+
+## MSI checks
+
+CI builds the MSI on windows-2022 and windows-2025 and runs
+`scripts/msi-check.ps1` (install rollback, install, repair, uninstall). Enrollment
+on real Win10, Win11, Server 2019 and Server 2022 machines against this dev stack
+is manual: see [docs/runbooks/msi-validation.md](runbooks/msi-validation.md).
+
+## Dev trust chain
+
+`scripts/dev-trust.sh` (run by `dev-up.sh`) uses `rmm-sign` with throwaway keys
+(passphrase `dev-only`) to create `deploy/dev/trust/`: `root.age`,
+`catalog.age`, `command.seed` (the API's online command key, mounted read-only
+at `/run/rmm-trust`), a root-signed `manifest.env` (capability ceiling
+`service`, `files.write`), an empty `revocations.env` (45-day expiry) and the
+signed `printing.spooler-restart.env`. It is idempotent; `--force` re-signs.
+`dev-up.sh` writes `RMM_ROOT_PUBKEYS` into `deploy/.env` and uploads the
+documents through the API. Agents for the e2e scripts are built with that
+`RMM_ROOT_PUBKEYS`. `scripts/e2e-actions.sh` proves success, rollback,
+revocation and forged-result handling.
+
+## Co-signed shell (dev)
+
+`scripts/e2e-shell.sh` exercises the whole technician path with a software
+authenticator instead of a YubiKey. `scripts/dev-trust.sh` creates
+`deploy/dev/webauthn/` (the dev FIDO attestation root, `attestation-root.pem`,
+its key and `aaguid.hex`) with `cargo run -p xtask -- fake-authn ca --out DIR`,
+and `deploy/dev/recordings/` (where the API container writes session
+recordings, asciicast v2, one file per session). The API mounts the first
+read-only; `deploy/.env` needs `RMM_WEBAUTHN_ATTESTATION_ROOTS` and
+`RMM_WEBAUTHN_AAGUIDS` from `deploy/.env.example` (the e2e script appends them
+when missing). The dev AAGUID is `726d6d2d6465762d66616b652d6b6579`
+("rmm-dev-fake-key"); the API refuses to enable registration when it is listed
+without `RMM_AUTH_ALLOW_DEV=1`, and a techlist holding such a credential can be
+signed only with `rmm-sign ... --allow-aaguid`.
+
+By hand, with a dev token `$TECH_TOKEN` for the technician (`rmm-server
+dev-token --role RMM.Technician --sub alice`):
+
+```sh
+x=target/debug/xtask   # cargo build -p xtask
+$x fake-authn register --api https://localhost --token "$TECH_TOKEN" \
+   --dir /tmp/authn --ca deploy/dev/webauthn --cacert deploy/dev/certs/ca.pem
+# assign the technician to a client, then export, sign and publish the techlist
+curl .../api/v1/agents/$AGENT/shell -d '{"shell":"sh"}' > grant.json
+$x fake-authn assert --grant-response grant.json --dir /tmp/authn > open.json
+curl .../api/v1/shell-sessions/$GRANT_ID/open -d @open.json   # -> ws_url, ws_ticket
+```
+
+The relay is `GET /api/v1/shell-sessions/{session_id}/ws?ticket=` (binary
+frames are keystrokes and output, text frames JSON). The dev API listens on
+`127.0.0.1:${RMM_API_PORT:-8080}` for it because the nginx config does not yet
+forward WebSocket upgrades on `/api/`. An admin downloads the recording from
+`GET /api/v1/shell-sessions/{session_id}/recording`; the API deletes sessions
+and files older than `RMM_RECORDING_RETENTION_DAYS` (default 365) once a day.
+`e2e-shell.sh` takes about two minutes, most of it the 50 MB print and the
+45 s liveness wait.
+
+## A/B update (dev)
+
+`scripts/e2e-update.sh` proves the whole update path against the dev stack.
+`scripts/dev-trust.sh` now also creates `release.age` (the dev release key,
+role `release` in the manifest; an older tree re-signs its trust documents once)
+and `deploy/dev/artifacts/` (mode 777: the API container, uid 10001, stores
+uploaded artifacts there under their SHA-256). The script builds the agent twice
+(`RMM_AGENT_VERSION=0.1.0` as the watchdog's bootstrap, `0.1.1` as the release
+artifact), enrolls it and runs `rmm-watchdog run --root DIR --state-dir DIR
+--health-timeout 60` in a private mount namespace with a fake `/sys/class/dmi`
+(root or passwordless sudo needed). Debug agents refresh every
+`RMM_AGENT_REFRESH_INTERVAL_SECS` seconds instead of 15 minutes. Checks: (1) a
+signed 0.1.1 is staged, installed and promoted; (2) a 0.1.2 that never reports
+healthy is rolled back within 60 s + 30 s and lands in `bad_hashes`, and is not
+staged again; (3) a signed 0.1.0 is skipped as a downgrade, and planted in
+`pending/` the watchdog rejects it; (4) an artifact whose bytes differ from the
+signed hash is rejected by the agent, and one altered in `pending/` by the
+watchdog (both `hash_mismatch`); (5) `kill -9` of the agent starts a new one
+within 10 s. The server does not store the agent version, so the script reads
+the new version from `health.json`, which the agent writes only after a
+heartbeat went out, and checks that `last_seen` keeps advancing. The agent
+stages updates only when `RMM_WATCHDOG_ROOT` (default: the parent of the state
+directory, `%ProgramData%\RMM` on Windows) holds a `state.json` or `bootstrap/`;
+otherwise it logs that updates are disabled. It takes about five minutes.

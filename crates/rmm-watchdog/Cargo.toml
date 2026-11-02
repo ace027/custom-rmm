@@ -10,6 +10,29 @@ version.workspace = true
 [dependencies]
 rmm-proto.workspace = true
 rmm-trust.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
 
-[lints]
-workspace = true
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Services",
+] }
+
+# Keep in sync with [workspace.lints] in the root Cargo.toml. The one
+# difference: unsafe_code is "deny" instead of "forbid" so that the Windows
+# SCM host (src/service_windows.rs, the only module that opts in) can make
+# the FFI calls; every unsafe block must carry a SAFETY comment.
+[lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "deny"
+unwrap_used = "warn"
+print_stdout = "allow"
+undocumented_unsafe_blocks = "deny"

@@ -1,11 +1,17 @@
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ciborium::Value;
 use rmm_agent_core::identity::Identity;
+use rmm_agent_core::store::{OutboxItem, STORE_KEY_FILE, Store};
 use rmm_agent_core::telemetry::{
-    Intervals, build_batch, build_heartbeat, build_inventory, jitter, jitter_with, subject,
+    CancellationToken, DrainOutcome, Intervals, Sink, build_batch, build_heartbeat,
+    build_inventory, drain_loop, drain_once, jitter, jitter_with, subject,
 };
 use rmm_proto::telemetry::{self, KIND_HEARTBEAT, KIND_INVENTORY, KIND_METRIC};
+use tokio::sync::Notify;
 use uuid::Uuid;
 
 fn ident() -> Identity {
@@ -121,4 +127,233 @@ fn payloads_carry_no_identity() {
             );
         }
     }
+}
+
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new() -> Self {
+        static N: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "rmm-telemetry-test-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        Self(dir)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn open_store(dir: &Path) -> Arc<Store> {
+    let key = rmm_platform::keystore_named(dir, STORE_KEY_FILE);
+    Arc::new(Store::open(dir, key.as_ref()).expect("open store"))
+}
+
+fn id(n: u8) -> [u8; 16] {
+    [n; 16]
+}
+
+/// A sink whose first `fail_first` publish attempts (counted per item) fail.
+/// `ack_but_fail` makes the first attempt of every item reach the server
+/// (recorded in `delivered`) while reporting failure, like a lost ack.
+#[derive(Default)]
+struct FakeSink {
+    attempts: Mutex<Vec<[u8; 16]>>,
+    delivered: Mutex<Vec<[u8; 16]>>,
+    fail_batches: Mutex<u32>,
+    ack_but_fail: bool,
+}
+
+struct Handle(Arc<FakeSink>);
+
+impl Sink for Handle {
+    async fn publish_batch(&self, items: &[OutboxItem]) -> Vec<bool> {
+        {
+            let mut left = self.0.fail_batches.lock().expect("lock");
+            if *left > 0 {
+                *left -= 1;
+                return vec![false; items.len()];
+            }
+        }
+        let mut attempts = self.0.attempts.lock().expect("lock");
+        let mut delivered = self.0.delivered.lock().expect("lock");
+        items
+            .iter()
+            .map(|it| {
+                let first = !attempts.contains(&it.msg_id);
+                attempts.push(it.msg_id);
+                delivered.push(it.msg_id);
+                !(self.0.ack_but_fail && first)
+            })
+            .collect()
+    }
+}
+
+fn queue(store: &Store) {
+    // pushed out of priority order on purpose
+    store
+        .outbox_push(id(1), "s.metric", 2, b"m1")
+        .expect("push");
+    store.outbox_push(id(2), "s.inv", 1, b"i1").expect("push");
+    store
+        .outbox_push(id(3), "s.metric", 2, b"m2")
+        .expect("push");
+    store.outbox_push(id(4), "s.inv", 1, b"i2").expect("push");
+}
+
+#[tokio::test]
+async fn a_sink_that_fails_then_acks_sends_every_row_once_in_order() {
+    let dir = TempDir::new();
+    let store = open_store(dir.path());
+    queue(&store);
+    let sink = Arc::new(FakeSink {
+        fail_batches: Mutex::new(2),
+        ..FakeSink::default()
+    });
+
+    let wake = Arc::new(Notify::new());
+    let reconnect = Arc::new(Notify::new());
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(drain_loop(
+        Arc::clone(&store),
+        Handle(Arc::clone(&sink)),
+        wake,
+        reconnect,
+        shutdown.clone(),
+        (Duration::from_millis(5), Duration::from_millis(20)),
+    ));
+    for _ in 0..200 {
+        if store.outbox_len().expect("len") == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    shutdown.cancel();
+    task.await.expect("drain task");
+
+    assert_eq!(store.outbox_len().expect("len"), 0);
+    // inventory first (seq order within a priority), then metrics
+    assert_eq!(
+        *sink.delivered.lock().expect("lock"),
+        vec![id(2), id(4), id(1), id(3)]
+    );
+}
+
+#[tokio::test]
+async fn a_failed_step_keeps_all_rows_queued() {
+    let dir = TempDir::new();
+    let store = open_store(dir.path());
+    queue(&store);
+    let sink = Arc::new(FakeSink {
+        fail_batches: Mutex::new(1),
+        ..FakeSink::default()
+    });
+    let out = drain_once(&store, &Handle(Arc::clone(&sink)))
+        .await
+        .expect("drain");
+    assert_eq!(
+        out,
+        DrainOutcome {
+            sent: 0,
+            failed: 4,
+            empty: false
+        }
+    );
+    assert_eq!(store.outbox_len().expect("len"), 4);
+    let out = drain_once(&store, &Handle(Arc::clone(&sink)))
+        .await
+        .expect("drain");
+    assert_eq!((out.sent, out.failed), (4, 0));
+    assert!(
+        drain_once(&store, &Handle(Arc::clone(&sink)))
+            .await
+            .expect("drain")
+            .empty
+    );
+}
+
+#[tokio::test]
+async fn an_ack_reported_as_failed_is_resent_with_the_same_msg_id() {
+    let dir = TempDir::new();
+    let store = open_store(dir.path());
+    store.outbox_push(id(7), "s.metric", 2, b"m").expect("push");
+    let sink = Arc::new(FakeSink {
+        ack_but_fail: true,
+        ..FakeSink::default()
+    });
+
+    let first = drain_once(&store, &Handle(Arc::clone(&sink)))
+        .await
+        .expect("drain");
+    assert_eq!((first.sent, first.failed), (0, 1));
+    assert_eq!(store.outbox_len().expect("len"), 1);
+    let second = drain_once(&store, &Handle(Arc::clone(&sink)))
+        .await
+        .expect("drain");
+    assert_eq!((second.sent, second.failed), (1, 0));
+    assert_eq!(store.outbox_len().expect("len"), 0);
+    // the server saw the same id twice: it dedupes on msg_id
+    assert_eq!(*sink.delivered.lock().expect("lock"), vec![id(7), id(7)]);
+}
+
+#[tokio::test]
+async fn queued_rows_survive_a_restart_and_drain_afterwards() {
+    let dir = TempDir::new();
+    {
+        let store = open_store(dir.path());
+        queue(&store);
+    }
+    let store = open_store(dir.path());
+    assert_eq!(store.outbox_len().expect("len"), 4);
+    let sink = Arc::new(FakeSink::default());
+    let out = drain_once(&store, &Handle(Arc::clone(&sink)))
+        .await
+        .expect("drain");
+    assert_eq!((out.sent, out.failed), (4, 0));
+    assert_eq!(store.outbox_len().expect("len"), 0);
+}
+
+#[tokio::test]
+async fn reconnect_cuts_the_backoff_short() {
+    let dir = TempDir::new();
+    let store = open_store(dir.path());
+    queue(&store);
+    let sink = Arc::new(FakeSink {
+        fail_batches: Mutex::new(1),
+        ..FakeSink::default()
+    });
+    let reconnect = Arc::new(Notify::new());
+    let shutdown = CancellationToken::new();
+    // A 1 hour backoff: only the reconnect signal can make the retry happen.
+    let task = tokio::spawn(drain_loop(
+        Arc::clone(&store),
+        Handle(Arc::clone(&sink)),
+        Arc::new(Notify::new()),
+        Arc::clone(&reconnect),
+        shutdown.clone(),
+        (Duration::from_secs(3600), Duration::from_secs(3600)),
+    ));
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(store.outbox_len().expect("len"), 4);
+    reconnect.notify_one();
+    for _ in 0..200 {
+        if store.outbox_len().expect("len") == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    shutdown.cancel();
+    task.await.expect("drain task");
+    assert_eq!(store.outbox_len().expect("len"), 0);
 }

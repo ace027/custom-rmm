@@ -48,11 +48,15 @@ for c in rmm-agent rmm-agent-core rmm-watchdog rmm-session; do
   fi
 done
 
-if cargo tree -p rmm-watchdog --target all --prefix none | grep -qE '^tokio '; then
-  report FAIL "rmm-watchdog must not depend on tokio"
-else
-  report PASS "rmm-watchdog does not depend on tokio"
-fi
+# The watchdog must survive a bad agent build: no async runtime, no network.
+wd_tree=$(cargo tree -p rmm-watchdog --target all --prefix none)
+for dep in tokio reqwest async-nats hyper; do
+  if grep -qE "^$dep " <<<"$wd_tree"; then
+    report FAIL "rmm-watchdog must not depend on $dep"
+  else
+    report PASS "rmm-watchdog does not depend on $dep"
+  fi
+done
 
 for c in rmm-proto rmm-trust rmm-recipe; do
   if tree "$c" | grep -qE '^rmm-platform '; then

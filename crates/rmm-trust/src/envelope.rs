@@ -15,6 +15,8 @@ pub const TYPE_REVOCATIONS: &str = "rmm.revocations/1";
 pub const TYPE_COMMAND: &str = "rmm.command/1";
 /// Payload type of a technician list.
 pub const TYPE_TECHLIST: &str = "rmm.techlist/1";
+/// Payload type of a release manifest.
+pub const TYPE_RELEASE: &str = "rmm.release/1";
 
 /// The only signature algorithm identifier.
 pub const ALG_ED25519: &str = "ed25519";

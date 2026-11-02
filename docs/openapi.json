@@ -10,6 +10,307 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/v1/action-runs/{cmd_id}": {
+      "get": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Read an action run.",
+        "operationId": "get_action_run",
+        "parameters": [
+          {
+            "name": "cmd_id",
+            "in": "path",
+            "description": "Command id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRunResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing RMM.Admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/artifacts": {
+      "post": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Upload a release artifact; the server names it by its SHA-256.",
+        "operationId": "upload_artifact",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Artifact stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Empty or interrupted upload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing RMM.Admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Larger than 256 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/techlist-draft": {
+      "get": {
+        "tags": [
+          "technicians"
+        ],
+        "summary": "Export the technician list draft for offline signing with\n`rmm-sign sign --type techlist`. `seq` is the stored techlist's plus one,\n`issued_at` is now and `expires_at` 30 days later; review them before\nsigning. A technician's `client_scope` lists the clients assigned in\n`msp.technician_client` (empty means none).",
+        "operationId": "techlist_draft",
+        "responses": {
+          "200": {
+            "description": "TechnicianList JSON draft (byte fields as lowercase hex)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing RMM.Admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/agents/{agent_id}/actions": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Invoke a catalog definition on an agent.",
+        "operationId": "issue_action",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "description": "Agent id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Command signed, recorded and published",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing RMM.Admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Agent is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unknown definition or invalid parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Command key missing or command not published",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/agents/{agent_id}/revoke": {
       "post": {
         "tags": [
@@ -64,6 +365,184 @@
           },
           "503": {
             "description": "Agent revoked but the kick was not published; retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/agents/{agent_id}/shell": {
+      "post": {
+        "tags": [
+          "shell"
+        ],
+        "summary": "Ask for a shell grant on an agent.",
+        "operationId": "create_grant",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "description": "Agent id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Grant stored; sign the challenge with the hardware key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid shell, duration or credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No registered credential, or the agent is outside the technician's clients",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Agent is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No trust manifest installed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/catalog": {
+      "put": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Upload a catalog-signed definition envelope.",
+        "operationId": "put_catalog",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Definition already stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEntry"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Definition stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEntry"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing RMM.Admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Not catalog-signed, invalid or revoked",
             "content": {
               "application/json": {
                 "schema": {
@@ -286,18 +765,418 @@
         ]
       }
     },
+    "/api/v1/shell-sessions/{grant_id}/open": {
+      "post": {
+        "tags": [
+          "shell"
+        ],
+        "summary": "Open a granted shell with the hardware key's assertion.",
+        "operationId": "open_shell",
+        "parameters": [
+          {
+            "name": "grant_id",
+            "in": "path",
+            "description": "Grant id (unpadded base64url) or session id (hex)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ShellOpen published; connect the relay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed request or assertion rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Credential revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown grant (or not the caller's)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Grant already used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Grant expired before it was opened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Command key, manifest or command stream unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/shell-sessions/{session_id}/recording": {
+      "get": {
+        "tags": [
+          "recording"
+        ],
+        "summary": "Download a session's recording.",
+        "operationId": "get_recording",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "Session id (hex)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "asciicast v2 recording",
+            "content": {
+              "application/x-asciicast": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing RMM.Admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown session or no recording",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The file does not match the stored hash",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/shell-sessions/{session_id}/ws": {
+      "get": {
+        "tags": [
+          "relay"
+        ],
+        "summary": "Connect the browser to a shell session opened with a ticket.",
+        "operationId": "shell_ws",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "Session id (hex)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ticket",
+            "in": "query",
+            "description": "Single-use ticket from open",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "WebSocket upgrade: binary frames carry terminal bytes, text frames carry JSON control"
+          },
+          "401": {
+            "description": "Ticket unknown, used, expired or for another session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Session is not waiting for a browser",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No NATS connection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/technicians/me/credentials/register/begin": {
+      "post": {
+        "tags": [
+          "technicians"
+        ],
+        "summary": "Start registering a hardware credential for the calling technician.",
+        "operationId": "register_begin",
+        "responses": {
+          "200": {
+            "description": "Creation options",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisterBeginResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Attestation or trust manifest not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/technicians/me/credentials/register/finish": {
+      "post": {
+        "tags": [
+          "technicians"
+        ],
+        "summary": "Finish registration: verify the hardware attestation and store the credential.",
+        "operationId": "register_finish",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterFinishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Credential registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisterFinishResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Credential id already registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Challenge unusable or attestation rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Attestation or trust manifest not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/trust/{kind}": {
       "put": {
         "tags": [
           "admin"
         ],
-        "summary": "Upload a signed trust artifact.",
+        "summary": "Upload a signed trust artifact (a release manifest is `release`).",
         "operationId": "put_trust",
         "parameters": [
           {
             "name": "kind",
             "in": "path",
-            "description": "manifest, revocations or techlist",
+            "description": "manifest, revocations, techlist or release",
             "required": true,
             "schema": {
               "type": "string"
@@ -390,6 +1269,53 @@
         }
       }
     },
+    "/v1/artifacts/{sha256_hex}": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Download an artifact by its SHA-256 (no authentication: the hash is signed).",
+        "operationId": "download_artifact",
+        "parameters": [
+          {
+            "name": "sha256_hex",
+            "in": "path",
+            "description": "Lowercase hex SHA-256",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The artifact bytes",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such artifact",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/enroll": {
       "post": {
         "tags": [
@@ -461,6 +1387,101 @@
   },
   "components": {
     "schemas": {
+      "ActionRunResponse": {
+        "type": "object",
+        "description": "State of an action run.",
+        "required": [
+          "cmd_id",
+          "status",
+          "stages",
+          "created_at"
+        ],
+        "properties": {
+          "cmd_id": {
+            "type": "string",
+            "description": "Command id."
+          },
+          "created_at": {
+            "type": "string",
+            "description": "Creation time (RFC 3339)."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Completion time (RFC 3339), once the agent reported."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Rejection reason, when rejected."
+          },
+          "stages": {
+            "type": "object",
+            "description": "Per-stage outcomes reported by the agent."
+          },
+          "status": {
+            "type": "string",
+            "description": "`queued`, `succeeded`, `failed`, `rolled_back`, `rejected` or `expired`."
+          }
+        }
+      },
+      "AuthenticatorSelection": {
+        "type": "object",
+        "description": "`authenticatorSelection` of the creation options.",
+        "required": [
+          "user_verification",
+          "resident_key"
+        ],
+        "properties": {
+          "resident_key": {
+            "type": "string",
+            "description": "Always `discouraged`."
+          },
+          "user_verification": {
+            "type": "string",
+            "description": "Always `required`."
+          }
+        }
+      },
+      "CatalogEntry": {
+        "type": "object",
+        "description": "A stored catalog definition.",
+        "required": [
+          "content_id",
+          "id",
+          "version",
+          "capability",
+          "new"
+        ],
+        "properties": {
+          "capability": {
+            "type": "string",
+            "description": "Capability group."
+          },
+          "content_id": {
+            "type": "string",
+            "description": "Hex SHA-256 of the definition payload."
+          },
+          "id": {
+            "type": "string",
+            "description": "Dotted action name."
+          },
+          "new": {
+            "type": "boolean",
+            "description": "False when the same definition was already stored."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Definition version.",
+            "minimum": 0
+          }
+        }
+      },
       "CreateTokenRequest": {
         "type": "object",
         "description": "Request to mint an enrollment token.",
@@ -532,6 +1553,79 @@
           }
         }
       },
+      "GrantRequest": {
+        "type": "object",
+        "description": "Request for a shell grant.",
+        "required": [
+          "shell"
+        ],
+        "properties": {
+          "credential_id_b64url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Credential that will co-sign. Required when the technician has more\nthan one non-revoked credential."
+          },
+          "max_duration_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Longest session length in seconds (default 3600, at most 14400).",
+            "minimum": 0
+          },
+          "shell": {
+            "type": "string",
+            "description": "`sh`, `cmd` or `powershell`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "GrantResponse": {
+        "type": "object",
+        "description": "A grant waiting for its WebAuthn assertion.",
+        "required": [
+          "grant_id_b64url",
+          "grant_cbor_b64url",
+          "challenge_b64url",
+          "rp_id",
+          "allow_credentials",
+          "open_by"
+        ],
+        "properties": {
+          "allow_credentials": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Credential ids allowed to sign, unpadded base64url."
+          },
+          "challenge_b64url": {
+            "type": "string",
+            "description": "WebAuthn challenge to sign, unpadded base64url."
+          },
+          "grant_cbor_b64url": {
+            "type": "string",
+            "description": "Canonical grant bytes, unpadded base64url."
+          },
+          "grant_id_b64url": {
+            "type": "string",
+            "description": "Grant id, unpadded base64url (16 bytes)."
+          },
+          "open_by": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Latest time the grant may be opened (unix seconds).",
+            "minimum": 0
+          },
+          "rp_id": {
+            "type": "string",
+            "description": "Relying party id for `navigator.credentials.get`."
+          }
+        }
+      },
       "Health": {
         "type": "object",
         "description": "Body returned by the health endpoint.",
@@ -542,6 +1636,222 @@
           "status": {
             "type": "string",
             "description": "Always `ok` when the process is serving."
+          }
+        }
+      },
+      "IssueRequest": {
+        "type": "object",
+        "description": "Request to invoke a catalog definition on one agent.",
+        "required": [
+          "definition_content_id"
+        ],
+        "properties": {
+          "definition_content_id": {
+            "type": "string",
+            "description": "Hex content id of an uploaded definition."
+          },
+          "params": {
+            "type": "object",
+            "description": "Parameters, validated against the definition."
+          }
+        }
+      },
+      "IssueResponse": {
+        "type": "object",
+        "description": "An accepted command.",
+        "required": [
+          "cmd_id"
+        ],
+        "properties": {
+          "cmd_id": {
+            "type": "string",
+            "description": "Command id; poll `/api/v1/action-runs/{cmd_id}`."
+          }
+        }
+      },
+      "OpenRequest": {
+        "type": "object",
+        "description": "The authenticator's response to `navigator.credentials.get`.",
+        "required": [
+          "credential_id_b64url",
+          "authenticator_data_b64url",
+          "client_data_json_b64url",
+          "signature_b64url"
+        ],
+        "properties": {
+          "authenticator_data_b64url": {
+            "type": "string",
+            "description": "`response.authenticatorData`, unpadded base64url."
+          },
+          "client_data_json_b64url": {
+            "type": "string",
+            "description": "`response.clientDataJSON`, unpadded base64url."
+          },
+          "credential_id_b64url": {
+            "type": "string",
+            "description": "`rawId` of the credential that signed, unpadded base64url."
+          },
+          "signature_b64url": {
+            "type": "string",
+            "description": "`response.signature`, unpadded base64url."
+          }
+        },
+        "additionalProperties": false
+      },
+      "OpenResponse": {
+        "type": "object",
+        "description": "A session that was handed to the agent.",
+        "required": [
+          "session_id",
+          "ws_ticket",
+          "ws_url"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "Session id (the grant id as lowercase hex)."
+          },
+          "ws_ticket": {
+            "type": "string",
+            "description": "Single-use WebSocket ticket (60 s)."
+          },
+          "ws_url": {
+            "type": "string",
+            "description": "Relay path including the ticket; connect with `wss://<api host><ws_url>`."
+          }
+        }
+      },
+      "RegisterBeginResponse": {
+        "type": "object",
+        "description": "Options for `navigator.credentials.create`.",
+        "required": [
+          "challenge_id",
+          "challenge_b64url",
+          "rp_id",
+          "user_id_b64url",
+          "user_name",
+          "user_display_name",
+          "timeout_ms",
+          "attestation",
+          "authenticator_selection",
+          "pub_key_cred_params",
+          "exclude_credentials_b64url"
+        ],
+        "properties": {
+          "attestation": {
+            "type": "string",
+            "description": "Always `direct`."
+          },
+          "authenticator_selection": {
+            "$ref": "#/components/schemas/AuthenticatorSelection",
+            "description": "Authenticator requirements."
+          },
+          "challenge_b64url": {
+            "type": "string",
+            "description": "The challenge, unpadded base64url."
+          },
+          "challenge_id": {
+            "type": "string",
+            "description": "Pass back to `finish`."
+          },
+          "exclude_credentials_b64url": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Credentials already registered by this technician, unpadded base64url."
+          },
+          "pub_key_cred_params": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "description": "COSE algorithms: -7 (ES256), -8 (EdDSA)."
+          },
+          "rp_id": {
+            "type": "string",
+            "description": "Relying party id (the manifest's `console_rp_id`)."
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Timeout in milliseconds.",
+            "minimum": 0
+          },
+          "user_display_name": {
+            "type": "string",
+            "description": "User display name."
+          },
+          "user_id_b64url": {
+            "type": "string",
+            "description": "User handle, unpadded base64url."
+          },
+          "user_name": {
+            "type": "string",
+            "description": "User name (the technician id)."
+          }
+        }
+      },
+      "RegisterFinishRequest": {
+        "type": "object",
+        "description": "The authenticator's response to `navigator.credentials.create`.",
+        "required": [
+          "challenge_id",
+          "attestation_object_b64url",
+          "client_data_json_b64url"
+        ],
+        "properties": {
+          "attestation_object_b64url": {
+            "type": "string",
+            "description": "`response.attestationObject`, unpadded base64url."
+          },
+          "challenge_id": {
+            "type": "string",
+            "description": "`challenge_id` from `begin`."
+          },
+          "client_data_json_b64url": {
+            "type": "string",
+            "description": "`response.clientDataJSON`, unpadded base64url."
+          }
+        },
+        "additionalProperties": false
+      },
+      "RegisterFinishResponse": {
+        "type": "object",
+        "description": "A registered credential.",
+        "required": [
+          "cred_id_b64url",
+          "aaguid_hex"
+        ],
+        "properties": {
+          "aaguid_hex": {
+            "type": "string",
+            "description": "Authenticator AAGUID, lowercase hex."
+          },
+          "cred_id_b64url": {
+            "type": "string",
+            "description": "Credential id, unpadded base64url."
+          }
+        }
+      },
+      "UploadResponse": {
+        "type": "object",
+        "description": "Result of a stored upload.",
+        "required": [
+          "sha256_hex",
+          "size"
+        ],
+        "properties": {
+          "sha256_hex": {
+            "type": "string",
+            "description": "Lowercase hex SHA-256 computed by the server; the artifact's name."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size in bytes.",
+            "minimum": 0
           }
         }
       }

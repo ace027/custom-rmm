@@ -107,6 +107,22 @@ jobs:
         env:
           RMM_HTTPS_PORT: "8443"
         run: scripts/e2e-telemetry.sh
+      - name: End-to-end offline sync (outbox drain after an outage, no duplicates, restart, encryption at rest)
+        env:
+          RMM_HTTPS_PORT: "8443"
+        run: scripts/e2e-offline.sh
+      - name: End-to-end signed actions (spooler success, rollback, revocation, forged result)
+        env:
+          RMM_HTTPS_PORT: "8443"
+        run: scripts/e2e-actions.sh
+      - name: End-to-end co-signed shell (grant, hardware co-sign, relay, backpressure, timeouts, lockout, recording)
+        env:
+          RMM_HTTPS_PORT: "8443"
+        run: scripts/e2e-shell.sh
+      - name: End-to-end A/B update (signed update, health rollback, downgrade and tamper rejection, core restart)
+        env:
+          RMM_HTTPS_PORT: "8443"
+        run: scripts/e2e-update.sh
       - name: sqlx offline data is current
         env:
           SQLX_OFFLINE: "false"
@@ -125,12 +141,60 @@ jobs:
           [ -f deploy/.env ] || cp deploy/.env.example deploy/.env
           docker compose -f deploy/compose.yaml down -v
 
+  msi:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      # Hosted runners only cover Server 2022/2025. Win10, Win11 and Server 2019 have no
+      # hosted runner (windows-2019 is retired) and must be validated manually; see
+      # the msi-validation runbook.
+      matrix:
+        os: [windows-2022, windows-2025]
+    env:
+      # Public key of RFC 8032 test vector 1: a fixed dev/test value, never a production root.
+      RMM_ROOT_PUBKEYS: d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msi-${{ matrix.os }}
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add --global WixToolset.Util.wixext/5.0.2
+      - name: Build MSI
+        run: cargo run --locked -p xtask -- msi --out dist
+      - name: Check install rollback, install, repair and uninstall
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File scripts/msi-check.ps1 -Msi (Get-ChildItem dist/*.msi).FullName -LogDir msi-logs
+      - name: Upload MSI
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-${{ matrix.os }}
+          path: dist/*.msi
+          if-no-files-found: warn
+      - name: Upload install logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-logs-${{ matrix.os }}
+          path: msi-logs/*.log
+          if-no-files-found: warn
+
   test-windows:
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --locked -p rmm-proto -p rmm-trust -p rmm-recipe -p rmm-platform -p rmm-agent-core -p rmm-agent -p rmm-watchdog -p rmm-session
+      - name: Real Spooler through the SCM blocks (must not skip)
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --locked -p rmm-platform --test windows_spooler -- --nocapture 2>&1 | tee spooler.log
+          if grep -qi skipping spooler.log; then echo "windows_spooler test skipped" >&2; exit 1; fi
       - run: cargo build --locked -p rmm-agent
       - run: cargo build --locked -p rmm-sign
       # ARM64 is checked natively: cargo-xwin's flags break ring's and

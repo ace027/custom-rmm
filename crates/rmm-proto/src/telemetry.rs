@@ -109,6 +109,10 @@ impl Inventory {
         let mut c = self.clone();
         c.msg_id = Uuid::nil();
         c.sent_at = 0;
+        // Free space is volatile and already reported as a metric.
+        for v in &mut c.volumes {
+            v.free_bytes = 0;
+        }
         // Inventory contains only strings, integers, options and vectors, so
         // canonical encoding cannot fail; an empty input still yields a stable hash.
         let bytes = canonical::to_canonical_vec(&c).unwrap_or_default();
@@ -244,5 +248,15 @@ mod tests {
         assert_eq!(a.hash(), b.hash());
         b.ram_bytes = Some(2 << 30);
         assert_ne!(a.hash(), b.hash());
+    }
+
+    #[test]
+    fn hash_ignores_free_space() {
+        let a = inv();
+        let mut b = a.clone();
+        for v in &mut b.volumes {
+            v.free_bytes = v.free_bytes.wrapping_add(12345);
+        }
+        assert_eq!(a.hash(), b.hash());
     }
 }

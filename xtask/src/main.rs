@@ -1,4 +1,11 @@
-//! Developer automation: `cargo run -p xtask -- openapi [--check]`.
+//! Developer automation: `cargo run -p xtask -- openapi [--check]` and
+//! `cargo run -p xtask -- action-fixtures [--out DIR]` and
+//! `cargo run -p xtask -- msi [--out DIR] [--no-build] [--dry-run]` and
+//! `cargo run -p xtask -- fake-authn ca|register|assert` (dev and CI only).
+
+mod action_fixtures;
+mod fake_authn;
+mod msi;
 
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
@@ -45,7 +52,22 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("openapi") => openapi(args.iter().any(|a| a == "--check")),
-        _ => Err("usage: xtask openapi [--check]".to_string()),
+        Some("action-fixtures") => {
+            let out = match args.iter().position(|a| a == "--out") {
+                Some(i) => args.get(i + 1).map(PathBuf::from),
+                None => Some(action_fixtures::default_out(&root())),
+            };
+            match out {
+                Some(dir) => action_fixtures::run(&dir),
+                None => Err("--out needs a directory".to_string()),
+            }
+        }
+        Some("msi") => msi::run_msi(&root(), &args[1..]),
+        Some("fake-authn") => fake_authn::run(&args[1..]),
+        _ => Err(
+            "usage: xtask openapi [--check] | action-fixtures [--out DIR] | msi [--out DIR] [--no-build] [--dry-run] | fake-authn ca|register|assert"
+                .to_string(),
+        ),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

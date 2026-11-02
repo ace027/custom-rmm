@@ -1,13 +1,13 @@
 # Project State
 
 ## Current Position
-- **Phase**: 4 of 9 (executed, pending review)
-- **Status**: Phase 4 complete — all plans executed successfully
-- **Last Activity**: Plan 04-03 execution (2026-11-01)
+- **Phase**: 9 of 9 (complete)
+- **Status**: Phase 9 shipped (2026-11-02)
+- **Last Activity**: Phase 9 shipped (2026-11-02)
 
 ## Progress
 ```
-[##########..........] 50% — 15/30 plans complete
+[####################] 100% — 30/30 plans complete
 ```
 
 ## Recent Decisions
@@ -26,9 +26,10 @@
 - Foundation is broken into 9 Triad phases (design milestones M0-M8); product phases 2-6 come later
 - Open a pull request for the working branch through the GitHub MCP tools so CI runs on every push (replaces the earlier "no PR" default; gh CLI is not available)
 - Phase 4 throughput check split (user-approved): real agent at 50 ms interval must land >= 40 batches in 20 s (sysinfo CPU sampling blocks 200 ms per sample); ingest capacity proven by a 10000-sample burst within 60 s
+- rmm-sign extended (user-approved quick task): `definition` doc type (validated with rmm-recipe, catalog role) and `keygen-command` for the online server command key (0600 seed file; no seed export for root, catalog or card keys)
 
 ## Next Action
-Run `/triad:review` to verify Phase 4: Heartbeat, inventory and metrics
+All phases complete — project review finished!
 
 ## Phase 1 Results
 (build started 2026-10-31)
@@ -62,3 +63,45 @@ Run `/triad:review` to verify Phase 4: Heartbeat, inventory and metrics
 - Plan 04-02 (Wave 1): Telemetry wire types, collectors and agent publisher — Complete
 - Plan 04-03 (Wave 2): Ingest service and end-to-end telemetry — FAILED: Verification failed: RMM_HTTPS_PORT=8443 scripts/e2e-telemetry.sh; RMM_HTTPS_PORT=8443 scripts/e2e-enroll.sh
 - Plan 04-03 (Wave 2): Ingest service and end-to-end telemetry — Complete
+
+## Phase 5 Results
+(build started 2026-11-01)
+- Plan 05-01 (Wave 1): Encrypted local store — FAILED: Verification failed: scripts/check-layering.sh
+- Plan 05-01 (Wave 1): Encrypted local store — Complete
+- Plan 05-02 (Wave 2): Offline outbox, drain and server-side dedupe — PARTIAL: Dedupe, the agent outbox with drain on reconnect, and e2e-offline.sh are done. e2e-offline.sh passes again after the retry (Docker Hub 429 cleared). e2e-telemetry.sh still fails at check (6b) because 
+- Plan 05-02 (Wave 2): Offline outbox, drain and server-side dedupe — FAILED: Verification failed: RMM_HTTPS_PORT=8443 scripts/e2e-offline.sh; RMM_HTTPS_PORT=8443 scripts/e2e-telemetry.sh; DATABASE_URL=postgres://rmm:$(grep '^RMM_PG_PASSWORD=' deploy/.env.example | cut -d= -f2)
+- Plan 05-02 (Wave 2): Offline outbox, drain and server-side dedupe — Complete
+
+## Phase 6 Results
+(build started 2026-11-01)
+- Plan 06-01 (Wave 1): Recipe schema, validator, fixtures and phase dependencies — PARTIAL: none
+- Plan 06-01 (Wave 1): Recipe schema, validator, fixtures and phase dependencies — Complete
+- Plan 06-02 (Wave 2): Agent building blocks, command intake and executor — Complete
+- Plan 06-03 (Wave 2): Catalog, command issuing and result ingest — Complete
+- Plan 06-04 (Wave 3): Dev trust bootstrap, end-to-end actions and CI — BLOCKED: ENVIRONMENT issue requires human approval: free disk space on the Docker host. Separately, `rmm-sign` lacks definition signing and seed export, which needs a change in `crates/rmm-sign`.
+- Plan 06-04 (Wave 3): Dev trust bootstrap, end-to-end actions and CI — PARTIAL: none
+- Plan 06-04 (Wave 3): Dev trust bootstrap, end-to-end actions and CI — Complete
+
+## Phase 7 Results
+(build started 2026-11-01)
+- Plan 07-01 (Wave 1): Shell wire types, PTY abstraction and session indicator — Complete
+- Plan 07-02 (Wave 2): Hardware-only WebAuthn registration, shell tables and techlist allowlist — FAILED: Verification failed: cargo test -p rmm-db --test shell; cargo test -p rmm-api --test technicians; cargo run -q -p xtask -- openapi && git diff --exit-code docs/openapi.json; cargo sqlx prepare --works
+- Plan 07-03 (Wave 2): Agent shell: co-sign verification, ConPTY session pump and lockout — PARTIAL: 
+- Plan 07-02 (Wave 2): Hardware-only WebAuthn registration, shell tables and techlist allowlist — FAILED: Verification failed: cargo run -q -p xtask -- openapi && git diff --exit-code docs/openapi.json
+- Plan 07-03 (Wave 2): Agent shell: co-sign verification, ConPTY session pump and lockout — PARTIAL: Task 3 needs a `ShellLink` for `async_nats::Client`. Reading a core-NATS `Subscriber` requires the `futures::Stream` trait (async-nats 0.51 has no inherent `next` and no re-export). None of rmm-agent-
+- Plan 07-02 (Wave 2): Hardware-only WebAuthn registration, shell tables and techlist allowlist — Complete with Warnings
+- Plan 07-03 (Wave 2): Agent shell: co-sign verification, ConPTY session pump and lockout — Complete
+- Plan 07-04 (Wave 3): Grant API, browser relay, recordings and end-to-end shell — PARTIAL: Grant/open endpoints, relay, recordings with retention, NATS/compose config, fake authenticator and e2e script are written. The Rust-side verification passes, but scripts/e2e-shell.sh has not complete
+- Plan 07-04 (Wave 3): Grant API, browser relay, recordings and end-to-end shell — Complete with Warnings
+
+## Phase 8 Results
+(build started 2026-11-01)
+- Plan 08-01 (Wave 1): Signed releases, artifact hosting and trust/release distribution — Complete with Warnings
+- Plan 08-02 (Wave 2): Watchdog: A/B slots, verified apply, health rollback and supervision — Complete
+- Plan 08-03 (Wave 3): Agent update client, health signal and end-to-end update — Complete with Warnings
+
+## Phase 9 Results
+(build started 2026-11-01)
+- Plan 09-01 (Wave 1): WiX package, xtask msi and agent enrollment flag — Complete
+- Plan 09-02 (Wave 2): MSI CI checks and Windows validation matrix — PARTIAL: I wrote the check script, the CI `msi` job and the runbook, and linked the runbook from `docs/dev-environment.md`. The plan's grep and yaml checks pass. The script and the CI job have never run, becau
+- Plan 09-02 (Wave 2): MSI CI checks and Windows validation matrix — Complete

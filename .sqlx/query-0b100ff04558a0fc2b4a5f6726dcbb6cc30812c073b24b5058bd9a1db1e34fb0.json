@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select content_id, id, version, capability, envelope\n           from msp.action_definition where content_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "content_id",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 1,
+        "name": "id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "capability",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "envelope",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0b100ff04558a0fc2b4a5f6726dcbb6cc30812c073b24b5058bd9a1db1e34fb0"
+}

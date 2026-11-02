@@ -91,14 +91,36 @@ services:
       RMM_NATS_PUBLIC_URL: wss://localhost:${RMM_HTTPS_PORT:-443}/nats
       RMM_ROOT_PUBKEYS: ${RMM_ROOT_PUBKEYS:-}
       RMM_ROOT_THRESHOLD: ${RMM_ROOT_THRESHOLD:-1}
+      # Online command key; scripts/dev-trust.sh creates it.
+      RMM_COMMAND_KEY_FILE: /run/rmm-trust/command.seed
       RMM_ENTRA_TENANT_ID: ${RMM_ENTRA_TENANT_ID:-}
       RMM_ENTRA_AUDIENCE: api://rmm-dev
       # Dev issuer for `rmm-server dev-token`; never enable outside dev.
       RMM_AUTH_ALLOW_DEV: "1"
       RMM_AUTH_DEV_PUBKEY_FILE: /run/rmm-auth/dev-pub.pem
       RMM_AUTH_DEV_KEY_FILE: /run/rmm-auth/dev-key.pem
+      # Hardware-only WebAuthn registration (see deploy/.env.example). In dev
+      # the root PEM comes from the fake authenticator (`xtask fake-authn ca`,
+      # run by scripts/dev-trust.sh); unset, registration stays disabled (503).
+      RMM_WEBAUTHN_ATTESTATION_ROOTS: ${RMM_WEBAUTHN_ATTESTATION_ROOTS:-}
+      RMM_WEBAUTHN_AAGUIDS: ${RMM_WEBAUTHN_AAGUIDS:-}
+      # Shell session recordings (asciicast) and how long they are kept.
+      RMM_RECORDING_DIR: /var/lib/rmm/recordings
+      RMM_RECORDING_RETENTION_DAYS: ${RMM_RECORDING_RETENTION_DAYS:-365}
+      # Release artifacts, stored under their SHA-256 (served at /v1/artifacts/).
+      RMM_ARTIFACT_DIR: /var/lib/rmm/artifacts
+    # Loopback only: the dev end-to-end script talks to the relay directly.
+    ports:
+      - "127.0.0.1:${RMM_API_PORT:-8080}:8080"
     volumes:
+      # Created by scripts/dev-trust.sh, writable by the container user
+      # (uid 10001). Production: a volume owned by that uid.
+      - ./dev/recordings:/var/lib/rmm/recordings
+      # Like recordings: must exist and be writable by uid 10001 before start.
+      - ./dev/artifacts:/var/lib/rmm/artifacts
       - ./dev/auth:/run/rmm-auth:ro
+      - ./dev/trust:/run/rmm-trust:ro
+      - ./dev/webauthn:/run/rmm-webauthn:ro
     healthcheck:
       test: ["CMD", "/usr/local/bin/rmm-server", "healthcheck", "http://127.0.0.1:8080/healthz"]
       interval: 5s
