@@ -376,7 +376,7 @@ pass "(4) a pending/ artifact altered after signing was rejected by the watchdog
 # ------------------------------------------------------------------- (5)
 
 OLD=$(child_pid) || fail "(5) no agent process"
-kill -9 "$OLD"
+"${SUDO[@]}" kill -9 "$OLD" # the agent runs as root
 T5=$SECONDS
 NEW=
 until [[ -n $NEW && $NEW != "$OLD" ]]; do
