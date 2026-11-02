@@ -101,7 +101,7 @@
     <CustomAction Id="RmmEnrollData" Property="RmmEnrollRun" HideTarget="yes"
                   Value="&quot;[BootstrapDir]rmm-agent.exe&quot; enroll --server &quot;[SERVER_URL]&quot; --token &quot;[ENROLL_TOKEN]&quot; --if-not-enrolled" />
     <CustomAction Id="RmmEnrollRun" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
-                  Execute="deferred" Impersonate="no" Return="check" />
+                  Execute="deferred" Impersonate="no" Return="check" HideTarget="yes" />
 
     <InstallExecuteSequence>
       <Custom Action="RmmEnrollData" After="InstallFiles"

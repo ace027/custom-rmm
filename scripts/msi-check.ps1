@@ -19,6 +19,13 @@ $ErrorActionPreference = 'Stop'
 
 $ServiceName = 'RMMWatchdog'
 $TestToken = 'rmmenr_test'
+
+# Lines of a log that contain the token, with the token masked, for diagnosis.
+function Get-TokenLeak([string]$Path) {
+    Select-String -LiteralPath $Path -Pattern $TestToken -SimpleMatch |
+        ForEach-Object { "  line $($_.LineNumber): " + $_.Line.Replace($TestToken, '<TOKEN>') }
+}
+
 $ProgFiles = Join-Path $env:ProgramFiles 'RMM'
 $DataRoot = Join-Path $env:ProgramData 'RMM'
 $Bootstrap = Join-Path $DataRoot 'bootstrap'
@@ -91,6 +98,7 @@ try {
     Check 'rollback: no ProgramData\RMM left behind' (-not (Test-Path -LiteralPath $DataRoot)) "$DataRoot still present after the failed install (agent state outside MSI components?)"
     Check 'rollback: no Run value'(-not (Test-RunValue)) 'RMMSession Run value still present'
     $leak = Select-String -LiteralPath $log1 -Pattern $TestToken -SimpleMatch -Quiet
+    if ($leak) { Get-TokenLeak $log1 | Write-Host }
     Check 'log does not contain the token' (-not $leak) "$log1 contains the enrollment token"
     # The failure must come from the agent actually running, not from an empty command.
     $ran = Select-String -LiteralPath $log1 -Pattern 'server unreachable' -SimpleMatch -Quiet
@@ -135,6 +143,7 @@ try {
         Check 'enrolled: identity.json exists' (Test-Path -LiteralPath $identityFile) "$identityFile missing"
         Check 'enrolled: identity has the stub agent id' ((Get-Content -LiteralPath $identityFile -Raw) -match '0000000000a1') 'agent_id not in identity.json'
         $leak = Select-String -LiteralPath $logE -Pattern $TestToken -SimpleMatch -Quiet
+        if ($leak) { Get-TokenLeak $logE | Write-Host }
         Check 'enroll success log does not contain the token' (-not $leak) "$logE contains the enrollment token"
         $p = Start-Process -FilePath $BootstrapExe -NoNewWindow -Wait -PassThru -ArgumentList @('enroll', '--server', "http://127.0.0.1:$port", '--token', $TestToken, '--if-not-enrolled')
         Check '--if-not-enrolled exits 0 when enrolled' ($p.ExitCode -eq 0) "exit $($p.ExitCode)"
