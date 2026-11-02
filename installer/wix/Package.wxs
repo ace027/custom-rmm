@@ -57,21 +57,21 @@
     </Feature>
 
     <Component Id="WatchdogService" Directory="INSTALLFOLDER" Bitness="always64">
-      <File Id="WatchdogExe" Source="$(BinDir)\rmm-watchdog.exe" KeyPath="yes">
-        <!-- Runs "rmm-watchdog.exe service" as LocalSystem. -->
-        <ServiceInstall Id="RmmWatchdogSvc" Name="RMMWatchdog" DisplayName="RMM Watchdog"
-                        Description="Keeps the RMM agent running and applies verified updates."
-                        Type="ownProcess" Start="auto" ErrorControl="normal"
-                        Account="LocalSystem" Arguments="service" Vital="yes">
-          <util:ServiceConfig FirstFailureActionType="restart"
-                              SecondFailureActionType="restart"
-                              ThirdFailureActionType="restart"
-                              RestartServiceDelayInSeconds="5"
-                              ResetPeriodInDays="1" />
-        </ServiceInstall>
-        <ServiceControl Id="RmmWatchdogCtl" Name="RMMWatchdog" Start="install"
-                        Stop="both" Remove="uninstall" Wait="yes" />
-      </File>
+      <File Id="WatchdogExe" Source="$(BinDir)\rmm-watchdog.exe" KeyPath="yes" />
+      <!-- Runs "rmm-watchdog.exe service" as LocalSystem. The service binary is
+           the component's key path (WatchdogExe). -->
+      <ServiceInstall Id="RmmWatchdogSvc" Name="RMMWatchdog" DisplayName="RMM Watchdog"
+                      Description="Keeps the RMM agent running and applies verified updates."
+                      Type="ownProcess" Start="auto" ErrorControl="normal"
+                      Account="LocalSystem" Arguments="service" Vital="yes">
+        <util:ServiceConfig FirstFailureActionType="restart"
+                            SecondFailureActionType="restart"
+                            ThirdFailureActionType="restart"
+                            RestartServiceDelayInSeconds="5"
+                            ResetPeriodInDays="1" />
+      </ServiceInstall>
+      <ServiceControl Id="RmmWatchdogCtl" Name="RMMWatchdog" Start="install"
+                      Stop="both" Remove="uninstall" Wait="yes" />
     </Component>
 
     <Component Id="SessionHelper" Directory="INSTALLFOLDER" Bitness="always64">
