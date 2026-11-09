@@ -119,7 +119,18 @@ pub fn verify_release_latest(
     let env = latest.release?;
     let trust = load_trust(store, agent.roots.clone(), agent.threshold, clock);
     match verify_release(&trust, &env.0, clock.now()) {
-        Ok((_, doc)) => Some(doc),
+        Ok((signed, doc)) => {
+            if trust.is_artifact_revoked(&signed.content_id())
+                || doc.artifacts.iter().any(|a| {
+                    <[u8; 32]>::try_from(a.sha256.0.as_slice())
+                        .is_ok_and(|h| trust.is_artifact_revoked(&h))
+                })
+            {
+                tracing::warn!(version = %doc.version, "offered release is revoked");
+                return None;
+            }
+            Some(doc)
+        }
         Err(e) => {
             tracing::warn!("offered release rejected: {e}");
             None

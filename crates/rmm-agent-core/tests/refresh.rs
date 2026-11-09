@@ -16,14 +16,14 @@ use rmm_agent_core::refresh::{apply_trust_latest, offer_release, verify_release_
 use rmm_agent_core::store::{STORE_KEY_FILE, Store};
 use rmm_proto::canonical::to_canonical_vec;
 use rmm_trust::docs::{
-    Cert, Credential, ReleaseArtifact, ReleaseLatest, ReleaseManifest, Role, Technician,
-    TechnicianList, TrustLatest, TrustManifest,
+    ArtifactRevocations, Cert, Credential, ReleaseArtifact, ReleaseLatest, ReleaseManifest, Role,
+    Technician, TechnicianList, TrustLatest, TrustManifest,
 };
 use rmm_trust::envelope::{
-    ALG_ED25519, ENVELOPE_VERSION, Envelope, SigEntry, TYPE_MANIFEST, TYPE_RELEASE, TYPE_TECHLIST,
-    signing_message,
+    ALG_ED25519, ENVELOPE_VERSION, Envelope, SigEntry, TYPE_MANIFEST, TYPE_RELEASE,
+    TYPE_REVOCATIONS, TYPE_TECHLIST, signing_message,
 };
-use rmm_trust::keys::{Bytes, PublicKey, Sig64};
+use rmm_trust::keys::{Bytes, KeyId, PublicKey, Sig64};
 use rmm_trust::verify::{DocKind, FixedClock, SeqStore};
 
 const NOW: u64 = 1_800_000_000;
@@ -32,6 +32,7 @@ const ROOT: u8 = 1;
 const TECH: u8 = 2;
 const REL: u8 = 3;
 const CAT: u8 = 4;
+const REVOKE: u8 = 5;
 
 struct TempDir(PathBuf);
 
@@ -103,8 +104,14 @@ fn manifest() -> Vec<u8> {
             cert(TECH, vec![Role::Techlist]),
             cert(REL, vec![Role::Release]),
             cert(CAT, vec![Role::Catalog]),
+            cert(REVOKE, vec![Role::ArtifactRevoke]),
         ],
-        thresholds: BTreeMap::from([(Role::Techlist, 1), (Role::Release, 1), (Role::Catalog, 1)]),
+        thresholds: BTreeMap::from([
+            (Role::Techlist, 1),
+            (Role::Release, 1),
+            (Role::Catalog, 1),
+            (Role::ArtifactRevoke, 1),
+        ]),
         revoked_keys: vec![],
         console_rp_id: "rmm.example".into(),
         console_origins: vec!["https://rmm.example".into()],
@@ -321,4 +328,43 @@ fn release_without_a_cached_manifest_is_dropped() {
     let store = Store::open(tmp.path(), k.as_ref()).unwrap();
     let good = reply_release(Some(release(1, REL)));
     assert!(verify_release_latest(&good, &agent(), &store, &FixedClock(NOW)).is_none());
+}
+
+fn revocations(hash: [u8; 32]) -> Vec<u8> {
+    let doc = ArtifactRevocations {
+        seq: 1,
+        issued_at: NOW - 10,
+        expires_at: NOW + DAY,
+        revoked_hashes: vec![KeyId(hash)],
+    };
+    sign(TYPE_REVOCATIONS, to_canonical_vec(&doc).unwrap(), REVOKE)
+}
+
+/// Offer `rel` to a store holding a revocation list that revokes `hash`.
+fn offered_with_revoked(rel: &[u8], hash: [u8; 32]) -> bool {
+    let tmp = TempDir::new();
+    let store = store(tmp.path());
+    store
+        .trust_put(DocKind::Revocations, &revocations(hash))
+        .unwrap();
+    let reply = reply_release(Some(rel.to_vec()));
+    verify_release_latest(&reply, &agent(), &store, &FixedClock(NOW)).is_some()
+}
+
+#[test]
+fn release_with_a_revoked_artifact_hash_is_dropped() {
+    let rel = release(1, REL);
+    assert!(!offered_with_revoked(&rel, [9; 32]));
+}
+
+#[test]
+fn release_with_a_revoked_envelope_is_dropped() {
+    let rel = release(1, REL);
+    let id = Envelope::from_bytes(&rel).unwrap().content_id();
+    assert!(!offered_with_revoked(&rel, id));
+}
+
+#[test]
+fn unrelated_revocation_leaves_the_release_accepted() {
+    assert!(offered_with_revoked(&release(1, REL), [0x42; 32]));
 }

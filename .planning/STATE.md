@@ -27,6 +27,7 @@
 - Open a pull request for the working branch through the GitHub MCP tools so CI runs on every push (replaces the earlier "no PR" default; gh CLI is not available)
 - Phase 4 throughput check split (user-approved): real agent at 50 ms interval must land >= 40 batches in 20 s (sysinfo CPU sampling blocks 200 ms per sample); ingest capacity proven by a 10000-sample burst within 60 s
 - rmm-sign extended (user-approved quick task): `definition` doc type (validated with rmm-recipe, catalog role) and `keygen-command` for the online server command key (0600 seed file; no seed export for root, catalog or card keys)
+- Post-merge code read (quick task): the agent now refuses a release whose envelope or artifact hash is on the signed revocation list; the nginx shell-relay location no longer logs the ticket query string; technician-onboarding runbook corrected (agents refresh trust every 15 min). Open recommendations: watchdog manifest seq floor, release revocation in the watchdog, keystrokes in recordings, agent version storage, a production deployment profile
 
 ## Next Action
 All phases complete — project review finished!

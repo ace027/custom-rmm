@@ -43,7 +43,7 @@ curl -X PUT -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/octe
   --data-binary @techlist.env https://<api>/api/v1/trust/techlist     # 204
 ```
 
-The server verifies the signature and stores it; enrolling agents get it in their bundle. Re-sign and publish before `expires_at`: an agent refuses shells once its techlist is stale. Existing agents pick up a new techlist through a `TrustUpdate` command (the server does not send those yet; until it does, agents learn the new list when they re-enroll or are updated by hand).
+The server verifies the signature and stores it; enrolling agents get it in their bundle. Re-sign and publish before `expires_at`: an agent refuses shells once its techlist is stale. Running agents pick up a new techlist on their own: each agent asks the server for the latest trust documents when it connects and every 15 minutes after that, verifies them like any other trust update, and closes open sessions of technicians who are no longer listed.
 
 ## 5. Open a shell
 
