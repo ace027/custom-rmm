@@ -1,0 +1,40 @@
+generated: "2026-11-09"
+source: CODEBASE.md
+version: "1.0"
+mappings:
+  tests:
+    paths:
+      - crates/rmm-agent-core/tests
+      - crates/rmm-watchdog/tests
+      - crates/rmm-api/tests
+    priority: 10
+    pattern: "crates/rmm-agent-core/tests/**"
+    description: tests files
+  scripts:
+    paths:
+      - scripts
+    priority: 5
+    pattern: "scripts/**"
+    description: scripts files
+  docs:
+    paths:
+      - docs
+    priority: 5
+    pattern: "docs/**"
+    description: docs files
+packages:
+
+enforcement:
+  strictness: warn
+  exceptions:
+    - ".planning/**"
+autoUpdate:
+  enabled: true
+  mode: prompt
+  threshold:
+    newDirectoryFiles: 3
+    newCategoryFiles: 10
+    categoryChangePercent: 20
+  backup:
+    enabled: true
+    keepCount: 5
