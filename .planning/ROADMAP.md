@@ -11,6 +11,10 @@
 - [x] Phase 7: Co-signed remote shell (4 plans)
 - [x] Phase 8: Watchdog and A/B updater (3 plans)
 - [x] Phase 9: MSI packaging (2 plans)
+- [ ] Phase 10: Watchdog trust hardening (2 plans)
+- [ ] Phase 11: Shell recording privacy (2 plans)
+- [ ] Phase 12: Production deployment profile (2 plans)
+- [ ] Phase 13: Agent version tracking and rollout visibility (2 plans)
 
 ## Phase Details
 
@@ -116,6 +120,50 @@
 - [ ] MSI repair does not overwrite updater-owned A/B slots
 **Plans**: 2
 
+### Phase 10: Watchdog trust hardening
+**Goal**: The watchdog honors key and artifact revocation on its own: it never accepts a trust manifest older than one it has seen, and never installs a revoked release
+**Requirements**: REQ-24
+**Recommended Agents**: engineering-security-engineer, engineering-senior-developer
+**Success Criteria**:
+- [ ] A release staged with an older manifest than the watchdog has already accepted is rejected
+- [ ] A release whose envelope or artifact hash is on the staged, signed revocation list is rejected by the watchdog
+- [ ] A corrupt or missing state file never lowers the manifest or release floors
+- [ ] The end-to-end update check covers both rejections
+**Plans**: 2
+
+### Phase 11: Shell recording privacy
+**Goal**: Recordings no longer hold typed secrets in the clear: keystrokes are not recorded, files are encrypted at rest, and their size is bounded
+**Requirements**: REQ-25
+**Recommended Agents**: engineering-security-engineer, engineering-backend-architect
+**Success Criteria**:
+- [ ] A recording contains output and resize events only; typed input never reaches disk
+- [ ] Recording files are unreadable without the server's recording key; an admin download returns valid asciicast v2
+- [ ] A session that exceeds the per-recording size limit is closed with a stated reason
+- [ ] Recordings made before the change stay downloadable
+**Plans**: 2
+
+### Phase 12: Production deployment profile
+**Goal**: A production deployment cannot start with development shortcuts enabled
+**Requirements**: REQ-26
+**Recommended Agents**: engineering-infrastructure-devops, engineering-security-engineer
+**Success Criteria**:
+- [ ] The dev stack keeps working unchanged through an explicit dev override
+- [ ] With the production profile the API refuses to start when dev tokens, the dev attestation AAGUID or an empty root key set is configured
+- [ ] A production compose file and env template exist with no dev defaults, plus a deployment runbook
+- [ ] CI checks that the production profile rejects each dev shortcut
+**Plans**: 2
+
+### Phase 13: Agent version tracking and rollout visibility
+**Goal**: The server records which version every agent runs, so a release rollout can be followed from the API
+**Requirements**: REQ-27
+**Recommended Agents**: engineering-backend-architect, engineering-senior-developer
+**Success Criteria**:
+- [ ] The heartbeat's agent version is stored per agent with the time it was last reported, and a version change writes a device event
+- [ ] The API lists agents with their version and summarizes versions per release rollout
+- [ ] The end-to-end update check reads the new version from the API instead of the agent's health file
+- [ ] OpenAPI is regenerated
+**Plans**: 2
+
 ## Progress
 
 | Phase | Plans | Completed | Status |
@@ -129,3 +177,7 @@
 | 7 | 4 | 4 | Complete |
 | 8 | 3 | 3 | Complete |
 | 9 | 2 | 2 | Shipped |
+| 10 | 2 | 0 | Planned |
+| 11 | 2 | 0 | Planned |
+| 12 | 2 | 0 | Planned |
+| 13 | 2 | 0 | Planned |

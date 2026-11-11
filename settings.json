@@ -2,5 +2,8 @@
   "control_mode": "guarded",
   "adapter": {
     "test_command": "DATABASE_URL=postgres://rmm:$(sed -n 's/^RMM_PG_PASSWORD=//p' deploy/.env.example)@localhost:5432/rmm cargo test --workspace --locked"
+  },
+  "execution": {
+    "commit_prefix": "triad"
   }
 }

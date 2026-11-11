@@ -1,13 +1,13 @@
 # Project State
 
 ## Current Position
-- **Phase**: 9 of 9 (complete)
-- **Status**: Phase 9 shipped (2026-11-02)
-- **Last Activity**: Phase 9 shipped (2026-11-02)
+- **Phase**: 10 of 13 (planned)
+- **Status**: Phases 10-13 planned (2 plans each); none built yet
+- **Last Activity**: Phase 13 planning (2026-11-11)
 
 ## Progress
 ```
-[####################] 100% — 30/30 plans complete
+[###############.....] 79% — 30/38 plans complete
 ```
 
 ## Recent Decisions
@@ -30,7 +30,7 @@
 - Post-merge code read (quick task): the agent now refuses a release whose envelope or artifact hash is on the signed revocation list; the nginx shell-relay location no longer logs the ticket query string; technician-onboarding runbook corrected (agents refresh trust every 15 min). Open recommendations: watchdog manifest seq floor, release revocation in the watchdog, keystrokes in recordings, agent version storage, a production deployment profile
 
 ## Next Action
-All phases complete — project review finished!
+Run `/triad:build 10` — phases 10-13 are planned; build them in order (10 and 13 both extend scripts/e2e-update.sh).
 
 ## Phase 1 Results
 (build started 2026-10-31)
