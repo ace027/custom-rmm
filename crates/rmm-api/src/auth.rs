@@ -114,12 +114,28 @@ pub struct Claims {
 }
 
 impl Claims {
+    /// The caller's one stable identity: the Entra object id when present
+    /// (the same for every application in the tenant), else the subject
+    /// (development tokens). Audit rows and technician ids both use it, so a
+    /// technician-list entry can be matched to the audit trail.
+    pub fn identity(&self) -> &str {
+        if self.oid.is_empty() {
+            &self.sub
+        } else {
+            &self.oid
+        }
+    }
+
     /// Stable actor string for audit rows.
     pub fn actor(&self) -> String {
-        if self.oid.is_empty() {
-            self.sub.clone()
-        } else {
-            self.oid.clone()
+        self.identity().to_owned()
+    }
+
+    /// Technician id of the caller (401 when the token names nobody).
+    pub fn tech_id(&self) -> Result<&str, ApiError> {
+        match self.identity() {
+            "" => Err(ApiError::Unauthorized),
+            id => Ok(id),
         }
     }
 
@@ -427,5 +443,29 @@ impl<R: RoleName + Send + Sync> FromRequestParts<AppState> for RequireRole<R> {
         let claims = Claims::from_request_parts(parts, state).await?;
         require_role(&claims, R::ROLE)?;
         Ok(Self(claims, PhantomData))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identity_prefers_the_object_id() {
+        let entra = Claims {
+            sub: "pairwise-sub".into(),
+            oid: "object-id".into(),
+            ..Claims::default()
+        };
+        assert_eq!(entra.identity(), "object-id");
+        assert_eq!(entra.actor(), "object-id");
+        assert_eq!(entra.tech_id().ok(), Some("object-id"));
+
+        let dev = Claims {
+            sub: "dev-user".into(),
+            ..Claims::default()
+        };
+        assert_eq!(dev.tech_id().ok(), Some("dev-user"));
+        assert!(Claims::default().tech_id().is_err());
     }
 }

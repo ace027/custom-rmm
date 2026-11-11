@@ -402,6 +402,21 @@ fn replay() {
 }
 
 #[test]
+fn refused_open_does_not_burn_the_grant_id() {
+    let v = Verifier::new(true);
+    let g = grant(1);
+    // A forged assertion is refused, and must not use up the grant id...
+    let forged = Auth {
+        seed: COMMAND_SEED,
+        ..ALICE
+    };
+    assert_eq!(err(v.check(&g, &forged)), ShellReject::BadAssertion);
+    // ...so the technician's real co-signature still opens it, once.
+    assert!(v.check(&g, &ALICE).is_ok());
+    assert_eq!(err(v.check(&g, &ALICE)), ShellReject::Replay);
+}
+
+#[test]
 fn unknown_tech() {
     let v = Verifier::new(true);
     let mut g = grant(1);

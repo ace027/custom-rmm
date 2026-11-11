@@ -220,7 +220,7 @@ fn dev_auth() -> Authenticator {
 
 fn token(sub: &str, roles: &[&str]) -> String {
     let c = json!({"iss": DEV_ISSUER, "aud": AUD, "exp": now() + 600, "sub": sub,
-        "oid": format!("oid-{sub}"), "name": "Tech One", "roles": roles});
+        "oid": sub, "name": "Tech One", "roles": roles});
     let k = EncodingKey::from_rsa_der(&rsa_private_der_from_pem(DEV_KEY.as_bytes()).unwrap());
     format!(
         "Bearer {}",
@@ -231,7 +231,7 @@ fn token(sub: &str, roles: &[&str]) -> String {
 fn claims(sub: &str) -> Claims {
     Claims {
         sub: sub.into(),
-        oid: format!("oid-{sub}"),
+        oid: sub.into(),
         name: "Tech One".into(),
         roles: vec![],
     }

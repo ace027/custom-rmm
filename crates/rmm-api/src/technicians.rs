@@ -95,13 +95,6 @@ fn attestation(state: &AppState) -> Result<&AttestationConfig, ApiError> {
     })
 }
 
-fn tech_id(claims: &Claims) -> Result<&str, ApiError> {
-    if claims.sub.is_empty() {
-        return Err(ApiError::Unauthorized);
-    }
-    Ok(&claims.sub)
-}
-
 fn b64url(bytes: &[u8]) -> String {
     data_encoding::BASE64URL_NOPAD.encode(bytes)
 }
@@ -173,7 +166,7 @@ pub async fn register_begin(
     claims: Claims,
 ) -> Result<Json<RegisterBeginResponse>, ApiError> {
     attestation(&state)?;
-    let tech = tech_id(&claims)?;
+    let tech = claims.tech_id()?;
     let mut challenge = [0u8; 32];
     rand::rngs::SysRng
         .try_fill_bytes(&mut challenge)
@@ -254,7 +247,7 @@ pub async fn register_finish(
     Json(req): Json<RegisterFinishRequest>,
 ) -> Result<(StatusCode, Json<RegisterFinishResponse>), ApiError> {
     let cfg = attestation(&state)?;
-    let tech = tech_id(&claims)?;
+    let tech = claims.tech_id()?;
     let actor = claims.actor();
     let att_obj = from_b64url("attestation_object_b64url", &req.attestation_object_b64url)?;
     let client_data = from_b64url("client_data_json_b64url", &req.client_data_json_b64url)?;

@@ -9,10 +9,11 @@
 //! command-replay checks of [`rmm_trust::store::TrustStore::verify_command`]):
 //! grant decodes (canonical, structurally valid, no E2E key) -> grant and
 //! command are bound to this agent and client -> `now <= open_by + 30 s` ->
-//! `max_duration <= 14400` -> shell in the platform allowlist -> grant id not
-//! seen -> technician listed -> client in the technician's scope -> credential
-//! listed -> assertion verifies against `shell_challenge(grant bytes)`, the
-//! manifest's console RP id and origins, with UV required. The session limit
+//! `max_duration <= 14400` -> shell in the platform allowlist -> technician
+//! listed -> client in the technician's scope -> credential listed -> assertion
+//! verifies against `shell_challenge(grant bytes)`, the manifest's console RP
+//! id and origins, with UV required -> grant id not seen (checked last, so a
+//! refused open never uses up the grant id). The session limit
 //! ([`ShellReject::TooManySessions`]) is enforced when the session is opened.
 
 use std::fmt;
@@ -197,10 +198,6 @@ pub fn verify_shell_open(
     let Some(kind) = ShellKind::parse(&grant.shell) else {
         return reject(ShellReject::ShellNotAllowed, &grant.shell);
     };
-    if seen(&replay_key(&grant.grant_id.0)) {
-        return reject(ShellReject::Replay, "grant id already used");
-    }
-
     let Some(tech) = trust.techlist().and_then(|l| l.tech(&grant.tech_id)) else {
         return reject(ShellReject::UnknownTech, &grant.tech_id);
     };
@@ -239,6 +236,11 @@ pub fn verify_shell_open(
     };
     if let Err(e) = verify_assertion(assertion, &expected, &key) {
         return reject(ShellReject::BadAssertion, e);
+    }
+    // Last, so only a grant the technician really co-signed uses up its id:
+    // a refused open must not burn the grant.
+    if seen(&replay_key(&grant.grant_id.0)) {
+        return reject(ShellReject::Replay, "grant id already used");
     }
 
     Ok(VerifiedGrant {

@@ -96,13 +96,6 @@ async fn current_manifest(tx: &mut Tx<'_>, state: &AppState) -> Result<TrustMani
         .ok_or_else(|| ApiError::Unavailable("no valid trust manifest is installed".into()))
 }
 
-fn tech_id(claims: &Claims) -> Result<&str, ApiError> {
-    if claims.sub.is_empty() {
-        return Err(ApiError::Unauthorized);
-    }
-    Ok(&claims.sub)
-}
-
 fn b64url(bytes: &[u8]) -> String {
     data_encoding::BASE64URL_NOPAD.encode(bytes)
 }
@@ -187,7 +180,7 @@ pub async fn issue_grant(
     agent_id: Uuid,
     req: &GrantRequest,
 ) -> Result<GrantResponse, ApiError> {
-    let tech = tech_id(claims)?;
+    let tech = claims.tech_id()?;
     if !SHELLS.contains(&req.shell.as_str()) {
         return Err(ApiError::BadRequest(format!(
             "shell must be one of {}",
@@ -359,7 +352,7 @@ pub async fn open_session(
     grant_id: &[u8; 16],
     req: &OpenRequest,
 ) -> Result<Opened, ApiError> {
-    let tech = tech_id(claims)?;
+    let tech = claims.tech_id()?;
     let actor = claims.actor();
     let cred_id = from_b64url("credential_id_b64url", &req.credential_id_b64url)?;
     let assertion = Assertion {
